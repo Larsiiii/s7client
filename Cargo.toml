@@ -1,0 +1,13 @@
+[package]
+name = "s7client"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+tokio = { version = "1.20", features = ["net", "rt", "io-util", "time"] }
+deadpool = { version = "0.9.5", features = ["managed"] }
+
+[dev-dependencies]
+tokio = { version = "1.20", features = ["rt", "macros"] }
