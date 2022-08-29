@@ -6,7 +6,7 @@ use tokio::net::TcpStream;
 use super::header::S7ProtocolHeader;
 use super::types::{Area, DataItem, ReadWriteParams, RequestItem, S7DataTypes, READ_OPERATION};
 use crate::connection::tcp::exchange_buffer;
-use crate::errors::{Error, IsoError};
+use crate::errors::{Error, IsoError, S7ProtocolError};
 
 impl ReadWriteParams {
     pub(super) fn build_read(items: Vec<RequestItem>) -> Self {
@@ -62,9 +62,18 @@ pub(crate) async fn read_area(
 
         let read_data = exchange_buffer(conn, &mut request).await?;
         // TODO Check if s7 header is ack with data and check for errors
-        S7ProtocolHeader::try_from(read_data[0..12].to_vec())?
+        let response = S7ProtocolHeader::try_from(read_data[0..12].to_vec())?;
+        let response = response
             .is_ack_with_data()?
             .is_current_pdu_response(*pdu_number)?;
+
+        // Check for errors
+        if response.has_error() {
+            let (class, code) = response.get_errors();
+            return Err(Error::S7ProtocolError(S7ProtocolError::from_codes(
+                class, code,
+            )));
+        }
 
         let mut data_item = DataItem::try_from(read_data[14..].to_vec())?;
         offset += data_item.data.len() as u32;

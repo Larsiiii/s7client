@@ -45,13 +45,13 @@ async fn test_data_exchange() {
     // write data
     let test_value: u32 = 32;
     let test_data = test_value.to_be_bytes();
-    pool.db_write(TEST_DB, 0, &test_data.to_vec())
+    pool.db_write(TEST_DB, 508, &test_data.to_vec())
         .await
         .expect("Could not write to S7");
 
     // read data
     let read_data = pool
-        .db_read(TEST_DB, 0, test_data.len() as u32)
+        .db_read(TEST_DB, 508, test_data.len() as u32)
         .await
         .expect("Could not read data from S7");
 
@@ -61,13 +61,13 @@ async fn test_data_exchange() {
     // write data
     let test_value: u32 = 18942;
     let test_data = test_value.to_be_bytes();
-    pool.db_write(TEST_DB, 0, &test_data.to_vec())
+    pool.db_write(TEST_DB, 508, &test_data.to_vec())
         .await
         .expect("Could not write to S7");
 
     // read data
     let read_data = pool
-        .db_read(TEST_DB, 0, test_data.len() as u32)
+        .db_read(TEST_DB, 508, test_data.len() as u32)
         .await
         .expect("Could not read data from S7");
 
@@ -76,6 +76,9 @@ async fn test_data_exchange() {
 
 #[tokio::test]
 async fn test_bit_exchange() {
+    let test_byte = 0;
+    let test_bit = 1;
+
     // create single s7 client object
     let mut client = S7Client::new(std::net::Ipv4Addr::new(192, 168, 10, 72), S7Types::S71200)
         .await
@@ -83,13 +86,13 @@ async fn test_bit_exchange() {
 
     // write bit to true
     client
-        .db_write_bit(TEST_DB, 8, 0, true)
+        .db_write_bit(TEST_DB, test_byte, test_bit, true)
         .await
         .expect("Could not write bit");
 
     assert_eq!(
         client
-            .db_read_bit(TEST_DB, 8, 0)
+            .db_read_bit(TEST_DB, test_byte, test_bit)
             .await
             .expect("Could not read bit"),
         true
@@ -97,13 +100,13 @@ async fn test_bit_exchange() {
 
     // write bit to false
     client
-        .db_write_bit(TEST_DB, 8, 0, false)
+        .db_write_bit(TEST_DB, test_byte, test_bit, false)
         .await
         .expect("Could not write bit");
 
     assert_eq!(
         client
-            .db_read_bit(TEST_DB, 8, 0)
+            .db_read_bit(TEST_DB, test_byte, test_bit)
             .await
             .expect("Could not read bit"),
         false

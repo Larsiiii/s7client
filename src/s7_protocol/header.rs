@@ -82,6 +82,14 @@ impl S7ProtocolHeader {
             Err(Error::ResponseDoesNotBelongToCurrentPDU)
         }
     }
+
+    pub(crate) fn has_error(&self) -> bool {
+        self.error_class.is_some() || self.error_code.is_some()
+    }
+
+    pub(crate) fn get_errors(&self) -> (Option<u8>, Option<u8>) {
+        (self.error_class, self.error_code)
+    }
 }
 
 impl From<S7ProtocolHeader> for Vec<u8> {

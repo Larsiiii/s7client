@@ -6,7 +6,7 @@ use tokio::net::TcpStream;
 use super::header::S7ProtocolHeader;
 use super::types::{Area, DataItem, ReadWriteParams, RequestItem, S7DataTypes, WRITE_OPERATION};
 use crate::connection::tcp::exchange_buffer;
-use crate::errors::{Error, IsoError, S7DataItemResponseError};
+use crate::errors::{Error, IsoError, S7DataItemResponseError, S7ProtocolError};
 
 impl ReadWriteParams {
     fn build_write(items: Vec<RequestItem>) -> Self {
@@ -24,7 +24,7 @@ impl DataItem {
             Some(vec) => Ok(Self {
                 error_code: 0,
                 var_type: data_type as u8,
-                count: vec.len() as u16 * 8,
+                count: vec.len() as u16,
                 data: vec.to_vec(),
             }),
             None => Err(Error::ISORequest(IsoError::InvalidDataSize)),
@@ -75,36 +75,47 @@ pub(crate) async fn write_area(
         )?
         .into();
         let data_length = data.len();
-        let mut write_params: Vec<u8> = ReadWriteParams::build_write(vec![items]).into();
-        write_params.append(&mut data);
+        let write_params = ReadWriteParams::build_write(vec![items]);
+        dbg!("{:?}", &write_params);
+        let mut write_params_u8: Vec<u8> = write_params.into();
+        write_params_u8.append(&mut data);
 
         dbg!("Datenlänge: {:?}", data_length);
         // TODO!!!! Add last_pdu_ref
         // TODO check if response pdu ref matches requests
         let s7_header = S7ProtocolHeader::build_request(
             pdu_number,
-            (write_params.len() - data_length) as u16,
+            (write_params_u8.len() - data_length) as u16,
             data_length as u16,
         );
-        dbg!("{:?}", &write_params);
         let mut request: Vec<u8> = s7_header.into();
-        request.append(&mut write_params);
+        request.append(&mut write_params_u8);
 
         offset += requested_size;
 
         let exchanged_data = exchange_buffer(conn, &mut request).await?;
-        S7ProtocolHeader::try_from(exchanged_data[0..12].to_vec())?
+        let response = S7ProtocolHeader::try_from(exchanged_data[0..12].to_vec())?;
+        let response = response
             .is_ack_with_data()?
             .is_current_pdu_response(*pdu_number)?;
 
         // Check for errors
-        let error_code = exchanged_data[14];
-        // 255 signals everything went alright
-        if error_code != 255 {
-            return Err(Error::DataItemError(S7DataItemResponseError::from(
-                error_code,
+        if response.has_error() {
+            let (class, code) = response.get_errors();
+            return Err(Error::S7ProtocolError(S7ProtocolError::from_codes(
+                class, code,
             )));
         }
+        // Check for error in data item
+        if let Some(&error_code) = exchanged_data.get(14) {
+            // 255 signals everything went alright
+            if error_code != 255 {
+                return Err(Error::DataItemError(S7DataItemResponseError::from(
+                    error_code,
+                )));
+            }
+        }
+
         offset += requested_size;
     }
 

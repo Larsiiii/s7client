@@ -51,6 +51,7 @@ impl S7DataTypes {
     }
 }
 
+#[derive(Debug)]
 pub(super) struct ReadWriteParams {
     pub(super) function_code: u8, // Constant value of 0x04 for read or 0x05 for write Jobs and replies.
     pub(super) item_count: u8,    // Number of following Request Item structures.
