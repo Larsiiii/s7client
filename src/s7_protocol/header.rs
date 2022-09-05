@@ -54,8 +54,12 @@ impl S7ProtocolHeader {
     }
 
     #[allow(dead_code)]
-    pub(crate) fn is_ack(&self) -> bool {
-        self.message_type == ACK
+    pub(crate) fn is_ack(&self) -> Result<&Self, Error> {
+        if self.message_type == ACK || self.message_type == ACK_DATA {
+            Ok(self)
+        } else {
+            Err(Error::RequestNotAcknowledged)
+        }
     }
 
     pub(crate) fn is_ack_with_data(&self) -> Result<&Self, Error> {

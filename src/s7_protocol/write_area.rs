@@ -95,9 +95,7 @@ pub(crate) async fn write_area(
 
         let exchanged_data = exchange_buffer(conn, &mut request).await?;
         let response = S7ProtocolHeader::try_from(exchanged_data[0..12].to_vec())?;
-        let response = response
-            .is_ack_with_data()?
-            .is_current_pdu_response(*pdu_number)?;
+        let response = response.is_ack()?.is_current_pdu_response(*pdu_number)?;
 
         // Check for errors
         if response.has_error() {
