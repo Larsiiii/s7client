@@ -45,13 +45,13 @@ async fn test_data_exchange() {
     // write data
     let test_value: u32 = 32;
     let test_data = test_value.to_be_bytes();
-    pool.db_write(TEST_DB, 508, &test_data.to_vec())
+    pool.db_write(TEST_DB, 40, &test_data.to_vec())
         .await
         .expect("Could not write to S7");
 
     // read data
     let read_data = pool
-        .db_read(TEST_DB, 508, test_data.len() as u32)
+        .db_read(TEST_DB, 40, test_data.len() as u32)
         .await
         .expect("Could not read data from S7");
 
@@ -61,13 +61,13 @@ async fn test_data_exchange() {
     // write data
     let test_value: u32 = 18942;
     let test_data = test_value.to_be_bytes();
-    pool.db_write(TEST_DB, 508, &test_data.to_vec())
+    pool.db_write(TEST_DB, 40, &test_data.to_vec())
         .await
         .expect("Could not write to S7");
 
     // read data
     let read_data = pool
-        .db_read(TEST_DB, 508, test_data.len() as u32)
+        .db_read(TEST_DB, 40, test_data.len() as u32)
         .await
         .expect("Could not read data from S7");
 

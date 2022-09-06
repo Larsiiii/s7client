@@ -4,7 +4,10 @@ use std::mem;
 use tokio::net::TcpStream;
 
 use super::header::S7ProtocolHeader;
-use super::types::{Area, DataItem, ReadWriteParams, RequestItem, S7DataTypes, WRITE_OPERATION};
+use super::types::{
+    Area, DataItem, DataItemTransportSize, ReadWriteParams, RequestItem, S7DataTypes,
+    WRITE_OPERATION,
+};
 use crate::connection::tcp::exchange_buffer;
 use crate::errors::{Error, IsoError, S7DataItemResponseError, S7ProtocolError};
 
@@ -19,12 +22,13 @@ impl ReadWriteParams {
 }
 
 impl DataItem {
-    fn build_write(data_type: S7DataTypes, data: Option<&[u8]>) -> Result<Self, Error> {
+    fn build_write(data_type: DataItemTransportSize, data: Option<&[u8]>) -> Result<Self, Error> {
+        let transport_size = data_type.len();
         match data {
             Some(vec) => Ok(Self {
                 error_code: 0,
                 var_type: data_type as u8,
-                count: vec.len() as u16,
+                count: vec.len() as u16 * transport_size,
                 data: vec.to_vec(),
             }),
             None => Err(Error::ISORequest(IsoError::InvalidDataSize)),
@@ -70,7 +74,7 @@ pub(crate) async fn write_area(
             items_to_write as u16,
         );
         let mut data: Vec<u8> = DataItem::build_write(
-            data_type,
+            data_type.into(),
             buffer.get(offset as usize..(items_to_write * data_type.get_size()) as usize),
         )?
         .into();

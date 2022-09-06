@@ -153,11 +153,47 @@ impl From<RequestItem> for Vec<u8> {
 }
 
 #[derive(Debug)]
+pub(crate) enum DataItemTransportSize {
+    Null = 0x00,        // Null
+    Bit = 0x03,         // Bit
+    Byte = 0x04,        // Byte/Word/DWord
+    Integer = 0x05,     // Integer
+    Real = 0x07,        // Real
+    OctetString = 0x09, // Octet String
+}
+
+impl DataItemTransportSize {
+    pub(crate) fn len(&self) -> u16 {
+        match self {
+            Self::Bit | Self::Null => 1,
+            Self::Byte | Self::Integer | Self::Real | Self::OctetString => 8,
+        }
+    }
+}
+
+impl From<S7DataTypes> for DataItemTransportSize {
+    fn from(data_type: S7DataTypes) -> Self {
+        match data_type {
+            S7DataTypes::S7BIT => Self::Bit,
+            S7DataTypes::S7BYTE => Self::Byte,
+            S7DataTypes::S7CHAR => Self::Byte,
+            S7DataTypes::S7WORD => Self::Byte,
+            S7DataTypes::S7INT => Self::Integer,
+            S7DataTypes::S7DWORD => Self::Byte,
+            S7DataTypes::S7DINT => Self::Byte,
+            S7DataTypes::S7REAL => Self::Real,
+            S7DataTypes::S7COUNTER => Self::Byte,
+            S7DataTypes::S7TIMER => Self::Byte,
+        }
+    }
+}
+
+#[derive(Debug)]
 pub(super) struct DataItem {
     pub(super) error_code: u8, // The return value of the operation, 0xff signals success.
     // In the Write Request message this field is always set to zero.
     pub(super) var_type: u8,  // See RequestItem
-    pub(super) count: u16,    // See RequestItem
+    pub(super) count: u16,    // See RequestItem but size is given in bits
     pub(super) data: Vec<u8>, // This field contains the actual value of the addressed variable, its size is len(variable) * count.
 }
 
