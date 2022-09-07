@@ -33,6 +33,31 @@ impl From<PoolError<Error>> for Error {
     }
 }
 
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Error::IO(e) => format!("IO Error: {e}"),
+                Error::Pool(e) => format!("Pool Error: {e}"),
+                Error::Connection(e) => format!("Connection Error: {e}"),
+                Error::DataExchangeTimedOut => "Timeout during data exchange".to_string(),
+                Error::TryFrom(_, e) => e.to_string(),
+                Error::ISOResponse(e) => format!("ISO Response Error: {e}"),
+                Error::ISORequest(e) => format!("ISO Request Error: {e}"),
+                Error::RequestedBitOutOfRange =>
+                    "The request bit is out of range [0..7]".to_string(),
+                Error::RequestNotAcknowledged => "The PLC did not respond successful".to_string(),
+                Error::S7ProtocolError(e) => e.to_string(),
+                Error::DataItemError(e) => e.to_string(),
+                Error::ResponseDoesNotBelongToCurrentPDU =>
+                    "Mismatch in response and request ID".to_string(),
+            }
+        )
+    }
+}
+
 #[derive(Debug)]
 pub enum IsoError {
     Connect = 0x00010000,         // Connection error

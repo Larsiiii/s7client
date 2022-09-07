@@ -40,7 +40,8 @@ async fn create_connections() {
 #[tokio::test]
 async fn test_data_exchange() {
     // create S7 connection pool
-    let pool = S7Pool::new(std::net::Ipv4Addr::new(192, 168, 10, 72), S7Types::S71200);
+    let test_pool = S7Pool::new(std::net::Ipv4Addr::new(192, 168, 10, 72), S7Types::S71200);
+    let pool = test_pool.clone();
 
     // write data
     let test_value: u32 = 32;

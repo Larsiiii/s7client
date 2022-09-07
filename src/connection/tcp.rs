@@ -20,15 +20,6 @@ pub(crate) async fn connect(
     tcp_client: &mut TcpStream,
     s7_type: S7Types,
 ) -> Result<NegotiatePDUParameters, Error> {
-    // let mut tcp_client = TcpStream::connect(format!("127.0.0.1:{}", TCP_PORT))?;
-
-    // // match tcp_client {
-    // //     Ok(mut stream) => {
-
-    // tcp_client.set_read_timeout(Some(TIMEOUT))?;
-    // tcp_client.set_write_timeout(Some(TIMEOUT))?;
-    // println!("Successfully connected to server in port 102");
-
     // send connection request
     let iso: Vec<u8> = IsoControlPDU::build(1024, s7_type).into();
     tcp_client.write_all(&iso).await?;
@@ -40,28 +31,6 @@ pub(crate) async fn connect(
     cotp_connection.req_ok()?;
 
     negotiate_connection_params(tcp_client).await
-
-    // match read_tpkt_data(&mut tcp_client, packet_header.length) {
-    //     Ok(data) => {
-    //         let cotp_connection: Result<COTPConnection, ()> = data.try_into();
-    //         cotp_connection.unwrap().req_ok()?;
-    //         Ok(tcp_client)
-    //         // if cotp_connection.unwrap().req_ok() {
-    //         //     Ok(tcp_client)
-    //         // } else {
-    //         //     // TODO
-    //         //     Err(Error::Connection("jkdlffa".to_string()))
-    //         // }
-    //     },
-    //     // TODO
-    //     Err(e) => {println!("Failed to receive data"); Err(Error::Connection("jkdlffa".to_string()))}
-    // }
-    // },
-    // Err(_) => {
-    //     println!("Failed to connect");
-    //     Err(())
-    // }
-    // }
 }
 
 pub(crate) async fn disconnect(tcp_client: &mut TcpStream) -> Result<(), Error> {
@@ -84,44 +53,6 @@ pub(crate) async fn negotiate_connection_params(
     S7ProtocolHeader::try_from(exchanged_data[0..12].to_vec())?.is_ack_with_data()?;
     let params = NegotiatePDUParameters::try_from(exchanged_data[12..].to_vec())?;
     Ok(params)
-
-    // match exchange_buffer(conn, &mut negotiation_params) {
-    //     Ok(data) => {
-    //         let s7_header = S7ProtocolHeader::try_from(data[0..12].to_vec()).unwrap();
-    //         let params = NegotiatePDUParameters::try_from(data[12..].to_vec()).unwrap();
-    //         println!("PDU LENGTH: {:?}", params.pdu_length);
-    //         println!("MAX AMQ CALLER: {:?}", params.max_amq_caller);
-    //         println!("MAX AMQ CALLE: {:?}", params.max_amq_calle);
-
-    //         Ok(params)
-
-    //         let mut reader = crate::s7_protocol::read_area::Reader {};
-    //         let mut writer = crate::s7_protocol::write_area::Writer {};
-    //         println!(
-    //             "{:?}",
-    //             reader.read_area(
-    //                 conn,
-    //                 crate::s7_protocol::types::Area::DataBlock,
-    //                 1,
-    //                 30,
-    //                 5,
-    //                 crate::s7_protocol::types::S7DataTypes::S7BYTE
-    //             )
-    //         );
-    //         println!(
-    //             "{:?}",
-    //             writer.write_area(
-    //                 conn,
-    //                 crate::s7_protocol::types::Area::DataBlock,
-    //                 1,
-    //                 30,
-    //                 crate::s7_protocol::types::S7DataTypes::S7INT,
-    //                 &mut (2_i16).to_be_bytes().to_vec()
-    //             )
-    //         );
-    //     }
-    //     Err(_) => {}
-    // };
 }
 
 pub(crate) async fn send_buffer(conn: &mut TcpStream, data: &mut Vec<u8>) -> Result<(), Error> {
@@ -145,8 +76,8 @@ pub(crate) async fn send_buffer(conn: &mut TcpStream, data: &mut Vec<u8>) -> Res
 pub(crate) async fn recv_buffer(conn: &mut TcpStream) -> Result<Vec<u8>, Error> {
     let mut data_buffer: Vec<u8> = Vec::new();
     let mut is_last: bool = false;
-    // TODO if not last wait for others till last
-    // TODO Timeout if last is not coming
+
+    // if not last wait for others till last
     while !is_last {
         let header = read_tpkt_header(conn).await?;
         let iso_cotp_data = read_tpkt_data(conn, header.length).await?;
@@ -158,38 +89,19 @@ pub(crate) async fn recv_buffer(conn: &mut TcpStream) -> Result<Vec<u8>, Error> 
     }
 
     Ok(data_buffer)
-    // match read_tpkt_header(conn) {
-    //     Ok(header) => {
-    // match read_tpkt_data(conn, header.length) {
-    // //     Ok(iso_cotp_data) => {
-    //         match COTPData::try_from(iso_cotp_data[..3].to_vec()) {
-    //             Ok(cotp) => {
-    // if cotp.req_ok() && cotp.is_last() {
-    //     Ok(iso_cotp_data[3..].to_vec())
-    // } else { Err(()) }
-    //     },
-    //     Err(_) => Err(())
-    // }
-    //     },
-    //     Err(_) => Err(())
-    // }
-    //     },
-    //     Err(_) => Err(())
-    // }
 }
 
 pub(crate) async fn exchange_buffer(
     conn: &mut TcpStream,
     data: &mut Vec<u8>,
 ) -> Result<Vec<u8>, Error> {
-    // TODO implement timeout on operations
-    // Send data to PLC
+    // Send data to PLC with timeout
     match timeout(DATA_SEND_AND_RECEIVE_TIMEOUT, send_buffer(conn, data)).await {
         Ok(_) => {}
         Err(_) => return Err(Error::DataExchangeTimedOut),
     };
 
-    // Receive data from PLC
+    // Receive data from PLC with timeout
     match timeout(DATA_SEND_AND_RECEIVE_TIMEOUT, recv_buffer(conn)).await {
         Ok(data) => Ok(data?),
         Err(_) => Err(Error::DataExchangeTimedOut),

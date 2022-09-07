@@ -58,14 +58,22 @@ impl S7ProtocolHeader {
         if self.message_type == ACK || self.message_type == ACK_DATA {
             Ok(self)
         } else {
-            Err(Error::RequestNotAcknowledged)
+            // check for error codes in response
+            if self.error_class.is_some() || self.error_code.is_some() {
+                Err(Error::S7ProtocolError(S7ProtocolError::from_codes(
+                    self.error_class,
+                    self.error_code,
+                )))
+            } else {
+                Err(Error::RequestNotAcknowledged)
+            }
         }
     }
 
     pub(crate) fn is_ack_with_data(&self) -> Result<&Self, Error> {
         match self.message_type == ACK_DATA {
             true => {
-                // TODO CHECK FOR ERROR CODES
+                // check for error codes in response
                 if self.error_class.is_some() || self.error_code.is_some() {
                     Err(Error::S7ProtocolError(S7ProtocolError::from_codes(
                         self.error_class,

@@ -45,6 +45,7 @@ type S7PooledConnection = managed::Pool<S7PoolManager>;
 
 /// Pooled connection to a PLC device from the S7 family
 #[allow(missing_debug_implementations)]
+#[derive(Clone)]
 pub struct S7Pool(pub(crate) S7PooledConnection);
 
 impl S7Pool {

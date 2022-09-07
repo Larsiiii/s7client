@@ -54,15 +54,15 @@ pub(crate) async fn read_area(
             items_to_request as u16,
         );
         let mut request_params: Vec<u8> = ReadWriteParams::build_read(vec![items]).into();
-        // TODO!!!! Add last_pdu_ref
-        // TODO check if response pdu ref matches requests
+
         let s7_header = S7ProtocolHeader::build_request(pdu_number, request_params.len() as u16, 0);
         let mut request: Vec<u8> = s7_header.into();
         request.append(&mut request_params);
 
         let read_data = exchange_buffer(conn, &mut request).await?;
-        // TODO Check if s7 header is ack with data and check for errors
         let response = S7ProtocolHeader::try_from(read_data[0..12].to_vec())?;
+        // check if s7 header is ack with data and check for errors
+        // check if pdu of response matches request pdu
         let response = response
             .is_ack_with_data()?
             .is_current_pdu_response(*pdu_number)?;
