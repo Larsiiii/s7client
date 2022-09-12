@@ -68,6 +68,7 @@ impl S7Client {
     /// This is not necessary as the parameters get checked before a request is send to the PLC
     pub async fn connect(&mut self) -> Result<(), Error> {
         let connection_parameters = connect(&mut self.connection, self.s7_type).await?;
+
         self.pdu_length = connection_parameters.pdu_length;
         self.max_amq_caller = connection_parameters.max_amq_caller;
         self.max_amq_calle = connection_parameters.max_amq_calle;
@@ -84,7 +85,7 @@ impl S7Client {
 
     pub(crate) async fn validate_connection_info(&mut self) -> bool {
         if self.pdu_length == 0 {
-            let _ = self.connect().await;
+            let _connection = self.connect().await;
         }
         self.pdu_length > 0
     }

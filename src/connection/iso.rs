@@ -1,6 +1,8 @@
 use std::convert::TryFrom;
 use std::mem;
 
+use bytes::{Buf, BufMut, BytesMut};
+
 use crate::errors::{Error, IsoError};
 
 // PDU Type constants (Code + Credit)
@@ -64,11 +66,8 @@ pub enum S7Types {
 impl S7Types {
     fn to_tsap_info(self) -> TSAPInfo {
         match self {
-            Self::S7200 => TSAPInfo { rack: 0, slot: 2 },
-            Self::S7300 => TSAPInfo { rack: 0, slot: 2 },
-            Self::S71200 => TSAPInfo { rack: 0, slot: 0 },
-            Self::S71500 => TSAPInfo { rack: 0, slot: 0 },
-            _ => TSAPInfo { rack: 0, slot: 2 },
+            Self::S7200 | Self::S7300 | Self::S7400 => TSAPInfo { rack: 0, slot: 2 },
+            Self::S71200 | Self::S71500 => TSAPInfo { rack: 0, slot: 0 },
         }
     }
 }
@@ -109,25 +108,37 @@ impl TTPKTHeader {
             length,
         }
     }
+
+    pub(crate) fn len() -> usize {
+        4
+    }
 }
 
-impl TryFrom<Vec<u8>> for TTPKTHeader {
+impl TryFrom<&mut BytesMut> for TTPKTHeader {
     type Error = Error;
 
-    fn try_from(bytes: Vec<u8>) -> Result<Self, Self::Error> {
-        let error = Error::TryFrom(
-            bytes.to_owned(),
-            "Could not convert bytes into TPKT Header".to_string(),
-        );
-        match bytes.len() {
-            0..=3 => Err(error),
-            4 => Ok(Self {
-                version: bytes[0],
-                reserved: bytes[1],
-                length: u16::from_be_bytes([bytes[2], bytes[3]]),
-            }),
-            _ => Err(error),
+    fn try_from(bytes: &mut BytesMut) -> Result<Self, Self::Error> {
+        // check if there are enough bytes for a header
+        if bytes.len() >= Self::len() {
+            Ok(Self {
+                version: bytes.get_u8(),
+                reserved: bytes.get_u8(),
+                length: bytes.get_u16(),
+            })
+        } else {
+            Err(Error::ISOResponse(IsoError::ShortPacket))
         }
+    }
+}
+
+impl From<TTPKTHeader> for BytesMut {
+    fn from(header: TTPKTHeader) -> BytesMut {
+        let mut bytes = BytesMut::with_capacity(4);
+        bytes.put_u8(header.version);
+        bytes.put_u8(header.reserved);
+        bytes.put_u16(header.length);
+
+        bytes
     }
 }
 
@@ -147,13 +158,20 @@ struct COTPParams {
     tsap: Vec<u8>, // We don't know in advance these fields....
 }
 
-impl From<Vec<u8>> for COTPParams {
-    fn from(bytes: Vec<u8>) -> Self {
-        Self {
-            pdu_size_code: bytes[0],
-            pdu_size_len: bytes[1],
-            pdu_size_val: bytes[2],
-            tsap: bytes[3..].to_vec(),
+impl TryFrom<&mut BytesMut> for COTPParams {
+    type Error = Error;
+
+    fn try_from(bytes: &mut BytesMut) -> Result<Self, Self::Error> {
+        // check if there are enough bytes for a header
+        if bytes.len() >= 3 {
+            Ok(Self {
+                pdu_size_code: bytes.get_u8(),
+                pdu_size_len: bytes.get_u8(),
+                pdu_size_val: bytes.get_u8(),
+                tsap: bytes.to_vec(),
+            })
+        } else {
+            Err(Error::ISOResponse(IsoError::ShortPacket))
         }
     }
 }
@@ -235,6 +253,12 @@ pub(crate) struct COTPDisconnect {
                   //          connection
 }
 
+impl COTPDisconnect {
+    pub(crate) fn len() -> usize {
+        7
+    }
+}
+
 impl CoTp for COTPConnection {
     fn get_pdu_type(&self) -> u8 {
         self.pdu_type
@@ -249,25 +273,22 @@ impl CoTp for COTPConnection {
     }
 }
 
-impl TryFrom<Vec<u8>> for COTPConnection {
+impl TryFrom<&mut BytesMut> for COTPConnection {
     type Error = Error;
 
-    fn try_from(bytes: Vec<u8>) -> Result<Self, Self::Error> {
-        let error = Error::TryFrom(
-            bytes.to_owned(),
-            "Could not convert bytes into COTP for Connection".to_string(),
-        );
-        match bytes.len() - bytes[0] as usize {
-            0 => Err(error),
-            1 => Ok(Self {
-                header_length: bytes[0],
-                pdu_type: bytes[1],
-                dst_ref: u16::from_be_bytes([bytes[2], bytes[3]]),
-                src_ref: u16::from_be_bytes([bytes[4], bytes[5]]),
-                co_r: bytes[6],
-                cotp_params: COTPParams::from(bytes[7..].to_vec()),
-            }),
-            _ => Err(error),
+    fn try_from(bytes: &mut BytesMut) -> Result<Self, Self::Error> {
+        // check if there are enough bytes for a header
+        if bytes.len() >= 7 {
+            Ok(Self {
+                header_length: bytes.get_u8(),
+                pdu_type: bytes.get_u8(),
+                dst_ref: bytes.get_u16(),
+                src_ref: bytes.get_u16(),
+                co_r: bytes.get_u8(),
+                cotp_params: COTPParams::try_from(bytes)?,
+            })
+        } else {
+            Err(Error::ISOResponse(IsoError::ShortPacket))
         }
     }
 }
@@ -283,24 +304,21 @@ impl From<COTPConnection> for Vec<u8> {
     }
 }
 
-impl TryFrom<Vec<u8>> for COTPDisconnect {
+impl TryFrom<&mut BytesMut> for COTPDisconnect {
     type Error = Error;
 
-    fn try_from(bytes: Vec<u8>) -> Result<Self, Self::Error> {
-        let error = Error::TryFrom(
-            bytes.to_owned(),
-            "Could not convert bytes into COTP for Disconnect request".to_string(),
-        );
-        match bytes.len() - bytes[0] as usize {
-            0 => Err(error),
-            1 => Ok(Self {
-                header_length: bytes[0],
-                pdu_type: bytes[1],
-                dst_ref: u16::from_be_bytes([bytes[2], bytes[3]]),
-                src_ref: u16::from_be_bytes([bytes[4], bytes[5]]),
-                reason: bytes[6],
-            }),
-            _ => Err(error),
+    fn try_from(bytes: &mut BytesMut) -> Result<Self, Self::Error> {
+        // check if there are enough bytes for a header
+        if bytes.len() >= Self::len() {
+            Ok(Self {
+                header_length: bytes.get_u8(),
+                pdu_type: bytes.get_u8(),
+                dst_ref: bytes.get_u16(),
+                src_ref: bytes.get_u16(),
+                reason: bytes.get_u8(),
+            })
+        } else {
+            Err(Error::ISOResponse(IsoError::ShortPacket))
         }
     }
 }
@@ -340,6 +358,10 @@ pub(crate) struct COTPData {
 }
 
 impl COTPData {
+    pub(crate) fn len() -> usize {
+        3
+    }
+
     pub(crate) fn build() -> Self {
         COTPData {
             header_length: mem::size_of::<COTPData>() as u8 - 1,
@@ -385,9 +407,31 @@ impl TryFrom<Vec<u8>> for COTPData {
     }
 }
 
-impl From<COTPData> for Vec<u8> {
-    fn from(cotp: COTPData) -> Vec<u8> {
-        vec![cotp.header_length, cotp.pdu_type, cotp.eot_num]
+impl TryFrom<&mut BytesMut> for COTPData {
+    type Error = Error;
+
+    fn try_from(bytes: &mut BytesMut) -> Result<Self, Self::Error> {
+        // check if there are enough bytes for a header
+        if bytes.len() >= Self::len() {
+            Ok(Self {
+                header_length: bytes.get_u8(),
+                pdu_type: bytes.get_u8(),
+                eot_num: bytes.get_u8(),
+            })
+        } else {
+            Err(Error::ISOResponse(IsoError::ShortPacket))
+        }
+    }
+}
+
+impl From<COTPData> for BytesMut {
+    fn from(cotp: COTPData) -> BytesMut {
+        let mut bytes = BytesMut::with_capacity(3);
+        bytes.put_u8(cotp.header_length);
+        bytes.put_u8(cotp.pdu_type);
+        bytes.put_u8(cotp.eot_num);
+
+        bytes
     }
 }
 

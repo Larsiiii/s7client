@@ -1,4 +1,4 @@
-use s7client::{S7Client, S7Pool, S7Types};
+use s7client::{S7Client, S7Pool, S7ReadAccess, S7Types};
 use tokio::join;
 
 const TEST_DB: u16 = 1;
@@ -112,4 +112,29 @@ async fn test_bit_exchange() {
             .expect("Could not read bit"),
         false
     );
+}
+
+#[tokio::test]
+async fn test_multi() {
+    // create single s7 client object
+    let mut client = S7Client::new(std::net::Ipv4Addr::new(192, 168, 10, 72), S7Types::S71200)
+        .await
+        .expect("Could not create S7 Client");
+
+    let res = client
+        .db_read_multi(vec![
+            S7ReadAccess::Bytes {
+                db_number: 2,
+                start: 40,
+                length: 4,
+            },
+            S7ReadAccess::Bit {
+                db_number: TEST_DB,
+                byte: 0,
+                bit: 1,
+            },
+        ])
+        .await;
+
+    println!("{res:?}");
 }

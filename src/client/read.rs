@@ -1,4 +1,6 @@
 use super::create::S7Client;
+use super::S7ReadAccess;
+use crate::s7_protocol::read_area::read_area2;
 use crate::s7_protocol::types::{Area, S7DataTypes};
 use crate::S7Pool;
 use crate::{errors::Error, s7_protocol::read_area::read_area};
@@ -63,6 +65,22 @@ impl S7Client {
             .await?[0]
                 > 0)
         }
+    }
+
+    pub async fn db_read_multi(
+        &mut self,
+        info: Vec<S7ReadAccess>,
+    ) -> Result<Vec<Result<Vec<u8>, Error>>, Error> {
+        self.validate_connection_info().await;
+
+        read_area2(
+            &mut self.connection,
+            self.pdu_length,
+            &mut self.pdu_number,
+            Area::DataBlock,
+            info,
+        )
+        .await
     }
 
     /// Read a defined number of bytes from the 'Merker area' of the PLC with a certain offset

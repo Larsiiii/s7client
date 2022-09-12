@@ -1,6 +1,8 @@
 use std::convert::TryFrom;
 
-use crate::errors::{Error, S7ProtocolError};
+use bytes::{Buf, BufMut, BytesMut};
+
+use crate::errors::{Error, IsoError, S7ProtocolError};
 
 // **** Message Types ****
 // request sent by the master (e.g. read/write memory, read/write blocks, start/stop device, setup communication)
@@ -28,6 +30,10 @@ pub(crate) struct S7ProtocolHeader {
 }
 
 impl S7ProtocolHeader {
+    pub(crate) fn len_request() -> usize {
+        10
+    }
+
     pub(crate) fn build_request(
         pdu_ref: &mut u16,
         parameter_length: u16,
@@ -53,37 +59,39 @@ impl S7ProtocolHeader {
         }
     }
 
-    #[allow(dead_code)]
     pub(crate) fn is_ack(&self) -> Result<&Self, Error> {
         if self.message_type == ACK || self.message_type == ACK_DATA {
             Ok(self)
         } else {
+            Err(Error::RequestNotAcknowledged)
+        }
+    }
+
+    pub(crate) fn is_ack_with_data(&self) -> Result<&Self, Error> {
+        if self.message_type == ACK_DATA {
+            let mut has_error = false;
             // check for error codes in response
-            if self.error_class.is_some() || self.error_code.is_some() {
+            if let Some(class) = self.error_class {
+                if class != 0 {
+                    has_error = true;
+                }
+            }
+            if let Some(code) = self.error_code {
+                if code != 0 {
+                    has_error = true;
+                }
+            }
+
+            if has_error {
                 Err(Error::S7ProtocolError(S7ProtocolError::from_codes(
                     self.error_class,
                     self.error_code,
                 )))
             } else {
-                Err(Error::RequestNotAcknowledged)
+                Ok(self)
             }
-        }
-    }
-
-    pub(crate) fn is_ack_with_data(&self) -> Result<&Self, Error> {
-        match self.message_type == ACK_DATA {
-            true => {
-                // check for error codes in response
-                if self.error_class.is_some() || self.error_code.is_some() {
-                    Err(Error::S7ProtocolError(S7ProtocolError::from_codes(
-                        self.error_class,
-                        self.error_code,
-                    )))
-                } else {
-                    Ok(self)
-                }
-            }
-            false => Err(Error::RequestNotAcknowledged),
+        } else {
+            Err(Error::RequestNotAcknowledged)
         }
     }
 
@@ -96,7 +104,20 @@ impl S7ProtocolHeader {
     }
 
     pub(crate) fn has_error(&self) -> bool {
-        self.error_class.is_some() || self.error_code.is_some()
+        let mut has_error = false;
+        // check for error codes in response
+        if let Some(class) = self.error_class {
+            if class != 0 {
+                has_error = true;
+            }
+        }
+        if let Some(code) = self.error_code {
+            if code != 0 {
+                has_error = true;
+            }
+        }
+
+        has_error
     }
 
     pub(crate) fn get_errors(&self) -> (Option<u8>, Option<u8>) {
@@ -104,58 +125,52 @@ impl S7ProtocolHeader {
     }
 }
 
-impl From<S7ProtocolHeader> for Vec<u8> {
-    fn from(header: S7ProtocolHeader) -> Vec<u8> {
-        let mut vec = vec![header.protocol_id, header.message_type];
-        vec.append(&mut header.reserved.to_be_bytes().to_vec());
-
+impl From<S7ProtocolHeader> for BytesMut {
+    fn from(header: S7ProtocolHeader) -> BytesMut {
+        let mut bytes = BytesMut::with_capacity(12);
+        bytes.put_u8(header.protocol_id);
+        bytes.put_u8(header.message_type);
+        bytes.put_u16(header.reserved);
         // IMPORTANT: Little-Endian
-        vec.append(&mut header.pdu_reference.to_le_bytes().to_vec());
-
-        vec.append(&mut header.parameter_length.to_be_bytes().to_vec());
-        vec.append(&mut header.data_length.to_be_bytes().to_vec());
+        bytes.put_u16_le(header.pdu_reference);
+        bytes.put_u16(header.parameter_length);
+        bytes.put_u16(header.data_length);
 
         if header.error_code.is_some() && header.error_class.is_some() {
-            vec.append(&mut vec![
-                header.error_class.unwrap(),
-                header.error_code.unwrap(),
-            ]);
+            bytes.put_u8(header.error_class.unwrap());
+            bytes.put_u8(header.error_code.unwrap());
         }
-        vec
+
+        bytes
     }
 }
 
-impl TryFrom<Vec<u8>> for S7ProtocolHeader {
+impl TryFrom<&mut BytesMut> for S7ProtocolHeader {
     type Error = Error;
 
-    fn try_from(bytes: Vec<u8>) -> Result<Self, Self::Error> {
-        match bytes.len() {
-            10 | 12 => Ok(Self {
-                protocol_id: bytes[0],
-                message_type: bytes[1],
-                reserved: u16::from_be_bytes([bytes[2], bytes[3]]),
-                pdu_reference: u16::from_le_bytes([bytes[4], bytes[5]]),
-                parameter_length: u16::from_be_bytes([bytes[6], bytes[7]]),
-                data_length: u16::from_be_bytes([bytes[8], bytes[9]]),
-                error_class: match bytes.len() {
-                    12 => match bytes[10] {
-                        0x0 => None,
-                        _ => Some(bytes[10]),
-                    },
-                    _ => None,
-                },
-                error_code: match bytes.len() {
-                    12 => match bytes[11] {
-                        0x0 => None,
-                        _ => Some(bytes[11]),
-                    },
-                    _ => None,
-                },
-            }),
-            _ => Err(Error::TryFrom(
-                bytes,
-                "Invalid length for bytes of S7 Protocol header...".to_string(),
-            )),
+    fn try_from(bytes: &mut BytesMut) -> Result<Self, Self::Error> {
+        // check if there are enough bytes for a header
+        if bytes.len() >= 10 {
+            let mut header = Self {
+                protocol_id: bytes.get_u8(),
+                message_type: bytes.get_u8(),
+                reserved: bytes.get_u16(),
+                // !!!! IMPORTANT to use Little-Endian
+                pdu_reference: bytes.get_u16_le(),
+                parameter_length: bytes.get_u16(),
+                data_length: bytes.get_u16(),
+                error_class: None,
+                error_code: None,
+            };
+
+            // add error class and code if header is with data
+            if header.message_type == ACK_DATA {
+                header.error_class = Some(bytes.get_u8());
+                header.error_code = Some(bytes.get_u8());
+            };
+            Ok(header)
+        } else {
+            Err(Error::ISOResponse(IsoError::ShortPacket))
         }
     }
 }

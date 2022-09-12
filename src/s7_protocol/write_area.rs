@@ -1,3 +1,4 @@
+use bytes::{BufMut, BytesMut};
 use std::convert::TryFrom;
 use std::mem;
 // use std::net::TcpStream;
@@ -73,29 +74,32 @@ pub(crate) async fn write_area(
             data_type,
             items_to_write as u16,
         );
-        let mut data: Vec<u8> = DataItem::build_write(
+        let data: BytesMut = DataItem::build_write(
             data_type.into(),
             buffer.get(offset as usize..(items_to_write * data_type.get_size()) as usize),
         )?
         .into();
         let data_length = data.len();
 
+        // create data buffer
+        let mut bytes = BytesMut::new();
+
         let write_params = ReadWriteParams::build_write(vec![items]);
-        let mut write_params_u8: Vec<u8> = write_params.into();
-        write_params_u8.append(&mut data);
+        let mut write_params_u8 = BytesMut::from(write_params);
+        write_params_u8.put(data);
 
         let s7_header = S7ProtocolHeader::build_request(
             pdu_number,
             (write_params_u8.len() - data_length) as u16,
             data_length as u16,
         );
-        let mut request: Vec<u8> = s7_header.into();
-        request.append(&mut write_params_u8);
+        bytes.put(BytesMut::from(s7_header));
+        bytes.put(write_params_u8);
 
         offset += requested_size;
 
-        let exchanged_data = exchange_buffer(conn, &mut request).await?;
-        let response = S7ProtocolHeader::try_from(exchanged_data[0..12].to_vec())?;
+        let mut exchanged_data = exchange_buffer(conn, bytes).await?;
+        let response = S7ProtocolHeader::try_from(&mut exchanged_data)?;
 
         // check if response is acknowledged and pdu ref matches request pdu
         let response = response.is_ack()?.is_current_pdu_response(*pdu_number)?;
@@ -107,8 +111,10 @@ pub(crate) async fn write_area(
                 class, code,
             )));
         }
+        let _read_params = ReadWriteParams::from(&mut exchanged_data);
+
         // Check for errors in data item
-        if let Some(&error_code) = exchanged_data.get(14) {
+        if let Some(&error_code) = exchanged_data.first() {
             // 255 signals everything went alright
             if error_code != 255 {
                 return Err(Error::DataItemError(S7DataItemResponseError::from(

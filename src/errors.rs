@@ -60,17 +60,17 @@ impl fmt::Display for Error {
 
 #[derive(Debug)]
 pub enum IsoError {
-    Connect = 0x00010000,         // Connection error
-    Disconnect = 0x00020000,      // Disconnect error
-    InvalidPDU = 0x00030000,      // Bad format
-    InvalidDataSize = 0x00040000, // Bad Data size passed to send/recv : buffer is invalid
+    Connect = 0x0001_0000,         // Connection error
+    Disconnect = 0x0002_0000,      // Disconnect error
+    InvalidPDU = 0x0003_0000,      // Bad format
+    InvalidDataSize = 0x0004_0000, // Bad Data size passed to send/recv : buffer is invalid
     // NullPointer = 0x00050000,      // Null passed as pointer
-    ShortPacket = 0x00060000,      // A short packet received
-    TooManyFragments = 0x00070000, // Too many packets without EoT flag
-    PduOverflow = 0x00080000,      // The sum of fragments data exceeded maximum packet size
-    SendPacket = 0x00090000,       // An error occurred during send
-    RecvPacket = 0x000A0000,       // An error occurred during recv
-    InvalidParams = 0x000B0000,    // Invalid TSAP params
+    ShortPacket = 0x0006_0000,      // A short packet received
+    TooManyFragments = 0x0007_0000, // Too many packets without EoT flag
+    PduOverflow = 0x0008_0000,      // The sum of fragments data exceeded maximum packet size
+    SendPacket = 0x0009_0000,       // An error occurred during send
+    RecvPacket = 0x000A_0000,       // An error occurred during recv
+    InvalidParams = 0x000B_0000,    // Invalid TSAP params
     Unknown,
 }
 

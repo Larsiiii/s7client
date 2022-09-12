@@ -1,5 +1,7 @@
 use std::convert::TryFrom;
 
+use bytes::{Buf, BufMut, BytesMut};
+
 use crate::errors::{Error, S7DataItemResponseError};
 
 pub(super) const READ_OPERATION: u8 = 0x04;
@@ -62,17 +64,34 @@ pub(super) struct ReadWriteParams {
                                                        // a read or write request.
 }
 
-impl From<ReadWriteParams> for Vec<u8> {
-    fn from(req_item: ReadWriteParams) -> Vec<u8> {
-        let mut vec = vec![req_item.function_code, req_item.item_count];
+impl ReadWriteParams {
+    pub(super) fn len() -> usize {
+        2
+    }
+}
+
+impl From<&mut BytesMut> for ReadWriteParams {
+    fn from(bytes: &mut BytesMut) -> Self {
+        Self {
+            function_code: bytes.get_u8(),
+            item_count: bytes.get_u8(),
+            request_item: None,
+        }
+    }
+}
+
+impl From<ReadWriteParams> for BytesMut {
+    fn from(req_item: ReadWriteParams) -> BytesMut {
+        let mut bytes = BytesMut::new();
+        bytes.put_u8(req_item.function_code);
+        bytes.put_u8(req_item.item_count);
         if let Some(items) = req_item.request_item {
             items.iter().for_each(|item| {
-                let mut item_as_vec: Vec<u8> = (*item).into();
-                vec.append(&mut item_as_vec);
+                bytes.put(BytesMut::from(*item));
             })
-        }
+        };
 
-        vec
+        bytes
     }
 }
 
@@ -99,6 +118,11 @@ pub(super) struct RequestItem {
 }
 
 impl RequestItem {
+    pub(super) fn len() -> usize {
+        // address is only 3 bytes long (not u32 as in struct)
+        12
+    }
+
     pub(super) fn build(
         area: Area,
         db_number: u16,
@@ -122,7 +146,7 @@ impl RequestItem {
         }
     }
 
-    pub(super) fn address_to_bytes(&self) -> Vec<u8> {
+    pub(super) fn address_to_bytes(&self) -> BytesMut {
         let mut address = self.address;
         let address_byte3 = (address & 0x0FF) as u8;
         address >>= 8;
@@ -130,25 +154,25 @@ impl RequestItem {
         address >>= 8;
         let address_byte1 = (address & 0x0FF) as u8;
 
-        vec![address_byte1, address_byte2, address_byte3]
+        let mut bytes = BytesMut::with_capacity(3);
+        bytes.extend_from_slice(&[address_byte1, address_byte2, address_byte3]);
+        bytes
     }
 }
 
-impl From<RequestItem> for Vec<u8> {
-    fn from(req_item: RequestItem) -> Vec<u8> {
-        let mut vec = vec![
-            req_item.specification_type,
-            req_item.item_length,
-            req_item.syntax_id,
-            req_item.var_type,
-        ];
-        vec.append(&mut req_item.data_length.to_be_bytes().to_vec());
-        vec.append(&mut req_item.db_number.to_be_bytes().to_vec());
-        vec.push(req_item.area);
+impl From<RequestItem> for BytesMut {
+    fn from(req_item: RequestItem) -> BytesMut {
+        let mut bytes = BytesMut::with_capacity(12);
+        bytes.put_u8(req_item.specification_type);
+        bytes.put_u8(req_item.item_length);
+        bytes.put_u8(req_item.syntax_id);
+        bytes.put_u8(req_item.var_type);
+        bytes.put_u16(req_item.data_length);
+        bytes.put_u16(req_item.db_number);
+        bytes.put_u8(req_item.area);
+        bytes.put(req_item.address_to_bytes());
 
-        vec.append(&mut req_item.address_to_bytes());
-
-        vec
+        bytes
     }
 }
 
@@ -162,10 +186,24 @@ pub(crate) enum DataItemTransportSize {
     OctetString = 0x09, // Octet String
 }
 
+impl From<u8> for DataItemTransportSize {
+    fn from(val: u8) -> Self {
+        match val {
+            0x03 => Self::Bit,
+            0x04 => Self::Byte,
+            0x05 => Self::Integer,
+            0x07 => Self::Real,
+            0x09 => Self::OctetString,
+            _ => Self::Null,
+        }
+    }
+}
+
 impl DataItemTransportSize {
     pub(crate) fn len(&self) -> u16 {
         match self {
-            Self::Bit | Self::Null => 1,
+            Self::Null => 0,
+            Self::Bit => 1,
             Self::Byte | Self::Integer | Self::Real | Self::OctetString => 8,
         }
     }
@@ -175,15 +213,15 @@ impl From<S7DataTypes> for DataItemTransportSize {
     fn from(data_type: S7DataTypes) -> Self {
         match data_type {
             S7DataTypes::S7BIT => Self::Bit,
-            S7DataTypes::S7BYTE => Self::Byte,
-            S7DataTypes::S7CHAR => Self::Byte,
-            S7DataTypes::S7WORD => Self::Byte,
+            S7DataTypes::S7BYTE
+            | S7DataTypes::S7CHAR
+            | S7DataTypes::S7WORD
+            | S7DataTypes::S7DWORD
+            | S7DataTypes::S7DINT
+            | S7DataTypes::S7COUNTER
+            | S7DataTypes::S7TIMER => Self::Byte,
             S7DataTypes::S7INT => Self::Integer,
-            S7DataTypes::S7DWORD => Self::Byte,
-            S7DataTypes::S7DINT => Self::Byte,
             S7DataTypes::S7REAL => Self::Real,
-            S7DataTypes::S7COUNTER => Self::Byte,
-            S7DataTypes::S7TIMER => Self::Byte,
         }
     }
 }
@@ -197,41 +235,53 @@ pub(super) struct DataItem {
     pub(super) data: Vec<u8>, // This field contains the actual value of the addressed variable, its size is len(variable) * count.
 }
 
-impl TryFrom<Vec<u8>> for DataItem {
+impl TryFrom<&mut BytesMut> for DataItem {
     type Error = Error;
 
-    fn try_from(bytes: Vec<u8>) -> Result<Self, Self::Error> {
-        // check for errors
-        // 255 signals everything went alright
-        if bytes[0] != 255 {
-            return Err(Error::DataItemError(S7DataItemResponseError::from(
-                bytes[0],
-            )));
-        }
-
-        // if no errors occurred try to convert data item
+    fn try_from(bytes: &mut BytesMut) -> Result<Self, Self::Error> {
+        // try to convert data item if it is long enough
         match bytes.len() {
-            x if x > 4 => Ok(Self {
-                error_code: bytes[0],
-                var_type: bytes[1],
-                count: u16::from_be_bytes([bytes[2], bytes[3]]) / 8,
-                data: bytes[4..].to_vec(),
-            }),
+            x if x > 4 => {
+                let error_code = bytes.get_u8();
+                let var_type = bytes.get_u8();
+                let count = bytes
+                    .get_u16()
+                    .checked_div(DataItemTransportSize::from(var_type).len())
+                    .unwrap_or(0);
+                let data = bytes.split_to(count as usize);
+
+                // check for errors
+                // 255 signals everything went alright
+                if error_code != 255 {
+                    return Err(Error::DataItemError(S7DataItemResponseError::from(
+                        error_code,
+                    )));
+                }
+
+                Ok(Self {
+                    error_code,
+                    var_type,
+                    count,
+                    data: data.to_vec(),
+                })
+            }
             _ => Err(Error::TryFrom(
-                bytes,
+                bytes.to_vec(),
                 "Invalid length for data item".to_string(),
             )),
         }
     }
 }
 
-impl From<DataItem> for Vec<u8> {
-    fn from(write_item: DataItem) -> Vec<u8> {
-        let mut vec = vec![write_item.error_code, write_item.var_type];
-        vec.append(&mut write_item.count.to_be_bytes().to_vec());
-        let mut data = write_item.data;
-        vec.append(&mut data);
+impl From<DataItem> for BytesMut {
+    fn from(item: DataItem) -> BytesMut {
+        let mut bytes = BytesMut::new();
 
-        vec
+        bytes.put_u8(item.error_code);
+        bytes.put_u8(item.var_type);
+        bytes.put_u16(item.count);
+        bytes.put(item.data.as_slice());
+
+        bytes
     }
 }

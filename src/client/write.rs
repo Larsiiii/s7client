@@ -64,10 +64,7 @@ impl S7Client {
                 db_number,
                 start,
                 S7DataTypes::S7BIT,
-                &vec![match value {
-                    true => 1,
-                    false => 0,
-                }],
+                &vec![if value { 1 } else { 0 }],
             )
             .await
         }

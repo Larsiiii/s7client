@@ -1,4 +1,5 @@
-#![warn(missing_docs)]
+// #![warn(missing_docs)]
+#![warn(clippy::pedantic)]
 #![deny(
     missing_debug_implementations,
     rust_2018_idioms,
@@ -23,7 +24,7 @@ s7client = { git = "https://github.com/Larsiiii/s7client" }
 ```
 
 # Examples
-A connection with a PLC can either be opened via a standalone connection ([S7Client](crate::client::create::S7Client)) or with a connection pool ([S7Pool](crate::client::pool::S7Pool)).
+A connection with a PLC can either be opened via a standalone connection ([`S7Client`](crate::client::create::S7Client)) or with a connection pool ([`S7Pool`](crate::client::pool::S7Pool)).
 ## Connection via standalone connection
 ```rust
 use std::net::Ipv4Addr;
@@ -57,6 +58,7 @@ pub mod errors;
 mod s7_protocol;
 
 pub use client::create::S7Client;
+pub use client::{S7ReadAccess, S7WriteAccess};
 pub use connection::iso::S7Types;
 
 pub use client::pool::S7Pool;

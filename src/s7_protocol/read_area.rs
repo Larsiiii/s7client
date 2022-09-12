@@ -1,12 +1,13 @@
+use bytes::{BufMut, BytesMut};
 use std::convert::TryFrom;
 use std::mem;
-// use std::net::TcpStream;
 use tokio::net::TcpStream;
 
 use super::header::S7ProtocolHeader;
 use super::types::{Area, DataItem, ReadWriteParams, RequestItem, S7DataTypes, READ_OPERATION};
 use crate::connection::tcp::exchange_buffer;
 use crate::errors::{Error, IsoError, S7ProtocolError};
+use crate::S7ReadAccess;
 
 impl ReadWriteParams {
     pub(super) fn build_read(items: Vec<RequestItem>) -> Self {
@@ -53,14 +54,17 @@ pub(crate) async fn read_area(
             data_type,
             items_to_request as u16,
         );
-        let mut request_params: Vec<u8> = ReadWriteParams::build_read(vec![items]).into();
+        let request_params = BytesMut::from(ReadWriteParams::build_read(vec![items]));
+
+        // create data buffer
+        let mut bytes = BytesMut::new();
 
         let s7_header = S7ProtocolHeader::build_request(pdu_number, request_params.len() as u16, 0);
-        let mut request: Vec<u8> = s7_header.into();
-        request.append(&mut request_params);
+        bytes.put(BytesMut::from(s7_header));
+        bytes.put(request_params);
 
-        let read_data = exchange_buffer(conn, &mut request).await?;
-        let response = S7ProtocolHeader::try_from(read_data[0..12].to_vec())?;
+        let mut read_data = exchange_buffer(conn, bytes).await?;
+        let response = S7ProtocolHeader::try_from(&mut read_data)?;
         // check if s7 header is ack with data and check for errors
         // check if pdu of response matches request pdu
         let response = response
@@ -74,11 +78,78 @@ pub(crate) async fn read_area(
                 class, code,
             )));
         }
-
-        let mut data_item = DataItem::try_from(read_data[14..].to_vec())?;
+        let _read_params = ReadWriteParams::from(&mut read_data);
+        let mut data_item = DataItem::try_from(&mut read_data)?;
         offset += data_item.data.len() as u32;
         buffer.append(&mut data_item.data);
     }
 
     Ok(buffer)
+}
+
+pub(crate) async fn read_area2(
+    conn: &mut TcpStream,
+    pdu_length: u16,
+    pdu_number: &mut u16,
+    area: Area,
+    info: Vec<S7ReadAccess>,
+) -> Result<Vec<Result<Vec<u8>, Error>>, Error> {
+    // Each S7 PDU (Header + Parameters + Data) must not exceed the maximum PDU length (bytes) negotiated with the
+    // PLC during connection.
+    // Moreover we must ensure that a "finite" number of items is send per PDU. If the command size does not fit in one PDU
+    // then it must be split across more subsequent PDU.
+
+    // check if all items fit into one PDU
+    if (info.len() * RequestItem::len()) + ReadWriteParams::len() + S7ProtocolHeader::len_request()
+        > pdu_length as usize
+    {}
+
+    let request_params = BytesMut::from(ReadWriteParams::build_read(
+        info.iter()
+            .map(|info| {
+                RequestItem::build(
+                    area,
+                    info.db_number(),
+                    info.start(),
+                    info.data_type(),
+                    info.len() as u16,
+                )
+            })
+            .collect(),
+    ));
+
+    // create data buffer
+    let mut bytes = BytesMut::new();
+
+    let s7_header = S7ProtocolHeader::build_request(pdu_number, request_params.len() as u16, 0);
+    bytes.put(BytesMut::from(s7_header));
+    bytes.put(request_params);
+
+    let mut read_data = exchange_buffer(conn, bytes).await?;
+    let response = S7ProtocolHeader::try_from(&mut read_data)?;
+    // check if s7 header is ack with data and check for errors
+    // check if pdu of response matches request pdu
+    let response = response
+        .is_ack_with_data()?
+        .is_current_pdu_response(*pdu_number)?;
+
+    // Check for errors
+    if response.has_error() {
+        let (class, code) = response.get_errors();
+        return Err(Error::S7ProtocolError(S7ProtocolError::from_codes(
+            class, code,
+        )));
+    }
+
+    // get response data
+    let read_params = ReadWriteParams::from(&mut read_data);
+    let data = (0..read_params.item_count)
+        .map(|_| DataItem::try_from(&mut read_data))
+        .map(|item| match item {
+            Ok(item) => Ok(item.data),
+            Err(e) => Err(e),
+        })
+        .collect::<Vec<Result<Vec<u8>, Error>>>();
+
+    Ok(data)
 }

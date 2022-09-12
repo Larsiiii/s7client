@@ -1,4 +1,5 @@
-use std::convert::{TryFrom, TryInto};
+use bytes::{BufMut, BytesMut};
+use std::convert::TryFrom;
 use std::mem;
 use std::time::Duration;
 // use std::net::TcpStream;
@@ -11,7 +12,6 @@ use crate::connection::iso::{COTPDisconnect, IsoDisconnect};
 use crate::errors::{Error, IsoError};
 use crate::s7_protocol::header::S7ProtocolHeader;
 use crate::s7_protocol::negotiate::{NegotiatePDUParameters, S7Negotiation};
-use crate::s7_protocol::S7Protocol;
 use crate::S7Types;
 
 const DATA_SEND_AND_RECEIVE_TIMEOUT: Duration = Duration::from_secs(4);
@@ -26,8 +26,9 @@ pub(crate) async fn connect(
 
     // Get response TTPKT Header
     let packet_header = read_tpkt_header(tcp_client).await?;
-    let tpkt_data = read_tpkt_data(tcp_client, packet_header.length).await?;
-    let cotp_connection: COTPConnection = tpkt_data.try_into()?;
+    let mut tpkt_data = read_tpkt_data(tcp_client, packet_header.length).await?;
+
+    let cotp_connection = COTPConnection::try_from(&mut tpkt_data)?;
     cotp_connection.req_ok()?;
 
     negotiate_connection_params(tcp_client).await
@@ -39,8 +40,9 @@ pub(crate) async fn disconnect(tcp_client: &mut TcpStream) -> Result<(), Error> 
 
     // Get response TTPKT Header
     let packet_header = read_tpkt_header(tcp_client).await?;
-    let tpkt_data = read_tpkt_data(tcp_client, packet_header.length).await?;
-    let cotp_disconnect: COTPDisconnect = tpkt_data.try_into()?;
+    let mut tpkt_data = read_tpkt_data(tcp_client, packet_header.length).await?;
+
+    let cotp_disconnect = COTPDisconnect::try_from(&mut tpkt_data)?;
     cotp_disconnect.req_ok()?;
     Ok(())
 }
@@ -48,53 +50,59 @@ pub(crate) async fn disconnect(tcp_client: &mut TcpStream) -> Result<(), Error> 
 pub(crate) async fn negotiate_connection_params(
     conn: &mut TcpStream,
 ) -> Result<NegotiatePDUParameters, Error> {
-    let mut negotiation_params: Vec<u8> = S7Negotiation::build().into();
-    let exchanged_data = exchange_buffer(conn, &mut negotiation_params).await?;
-    S7ProtocolHeader::try_from(exchanged_data[0..12].to_vec())?.is_ack_with_data()?;
-    let params = NegotiatePDUParameters::try_from(exchanged_data[12..].to_vec())?;
+    let negotiation_params = BytesMut::from(S7Negotiation::build());
+    let mut exchanged_data = exchange_buffer(conn, negotiation_params).await?;
+
+    S7ProtocolHeader::try_from(&mut exchanged_data)?.is_ack_with_data()?;
+    let params = NegotiatePDUParameters::try_from(&mut exchanged_data)?;
     Ok(params)
 }
 
-pub(crate) async fn send_buffer(conn: &mut TcpStream, data: &mut Vec<u8>) -> Result<(), Error> {
+pub(crate) async fn send_buffer(conn: &mut TcpStream, data: BytesMut) -> Result<(), Error> {
     // Telegram length
     let iso_len = mem::size_of::<TTPKTHeader>()     // TPKT Header
                 + mem::size_of::<COTPData>()        // COTP Header Size
                 + data.len(); // S7 params
     let tpkt_header = TTPKTHeader::build(iso_len as u16);
     let cotp = COTPData::build();
-    let mut data_vec: Vec<u8> = Vec::new();
+
+    // construct data
+    let mut bytes = BytesMut::new();
     // add TPKT Header
-    data_vec.append(&mut tpkt_header.into());
+    bytes.put(BytesMut::from(tpkt_header));
     // add COTP Header
-    data_vec.append(&mut cotp.into());
+    bytes.put(BytesMut::from(cotp));
     // add data
-    data_vec.append(data);
-    conn.write_all(&data_vec).await?;
+    bytes.put(data);
+
+    // send data to plc
+    conn.write_all(&bytes).await?;
+
     Ok(())
 }
 
-pub(crate) async fn recv_buffer(conn: &mut TcpStream) -> Result<Vec<u8>, Error> {
-    let mut data_buffer: Vec<u8> = Vec::new();
+pub(crate) async fn recv_buffer(conn: &mut TcpStream) -> Result<BytesMut, Error> {
+    let mut bytes = BytesMut::new();
     let mut is_last: bool = false;
 
     // if not last wait for others till last
     while !is_last {
         let header = read_tpkt_header(conn).await?;
-        let iso_cotp_data = read_tpkt_data(conn, header.length).await?;
-        let cotp = COTPData::try_from(iso_cotp_data[..3].to_vec())?;
+        let mut iso_cotp_data = read_tpkt_data(conn, header.length).await?;
+        let cotp = COTPData::try_from(&mut iso_cotp_data)?;
 
         cotp.req_ok()?;
-        data_buffer.append(&mut iso_cotp_data[3..].to_vec());
+        bytes.put(iso_cotp_data);
         is_last = cotp.is_last();
     }
 
-    Ok(data_buffer)
+    Ok(bytes)
 }
 
 pub(crate) async fn exchange_buffer(
     conn: &mut TcpStream,
-    data: &mut Vec<u8>,
-) -> Result<Vec<u8>, Error> {
+    data: BytesMut,
+) -> Result<BytesMut, Error> {
     // Send data to PLC with timeout
     match timeout(DATA_SEND_AND_RECEIVE_TIMEOUT, send_buffer(conn, data)).await {
         Ok(_) => {}
@@ -110,17 +118,15 @@ pub(crate) async fn exchange_buffer(
 
 async fn read_tpkt_header(conn: &mut TcpStream) -> Result<TTPKTHeader, Error> {
     // Get response TTPKT Header
-    let mut data = [0_u8; mem::size_of::<TTPKTHeader>()];
-    conn.read_exact(&mut data).await?;
-    TTPKTHeader::try_from(data.to_vec())
+    let mut data = BytesMut::with_capacity(mem::size_of::<TTPKTHeader>());
+    conn.read_buf(&mut data).await?;
+    TTPKTHeader::try_from(&mut data)
 }
 
-async fn read_tpkt_data(conn: &mut TcpStream, length: u16) -> Result<Vec<u8>, Error> {
-    let reader_length = length as usize - mem::size_of::<TTPKTHeader>();
-    let mut data = Vec::<u8>::new();
+async fn read_tpkt_data(conn: &mut TcpStream, length: u16) -> Result<BytesMut, Error> {
+    let mut data = BytesMut::with_capacity(length as usize - mem::size_of::<TTPKTHeader>());
 
-    data.resize(reader_length, 0);
-    match conn.read_exact(&mut data).await {
+    match conn.read_buf(&mut data).await {
         Ok(_) => Ok(data),
         Err(_) => Err(Error::ISOResponse(IsoError::InvalidDataSize)),
     }
