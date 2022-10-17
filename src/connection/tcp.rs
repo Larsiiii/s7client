@@ -10,8 +10,8 @@ use tokio::time::timeout;
 use super::iso::{COTPConnection, COTPData, CoTp, IsoControlPDU, TTPKTHeader};
 use crate::connection::iso::{COTPDisconnect, IsoDisconnect};
 use crate::errors::{Error, IsoError};
-use crate::s7_protocol::header::S7ProtocolHeader;
 use crate::s7_protocol::negotiate::{NegotiatePDUParameters, S7Negotiation};
+use crate::s7_protocol::segments::header::S7ProtocolHeader;
 use crate::S7Types;
 
 const DATA_SEND_AND_RECEIVE_TIMEOUT: Duration = Duration::from_secs(4);
@@ -50,7 +50,7 @@ pub(crate) async fn disconnect(tcp_client: &mut TcpStream) -> Result<(), Error> 
 pub(crate) async fn negotiate_connection_params(
     conn: &mut TcpStream,
 ) -> Result<NegotiatePDUParameters, Error> {
-    let negotiation_params = BytesMut::from(S7Negotiation::build());
+    let negotiation_params = BytesMut::from(S7Negotiation::build()?);
     let mut exchanged_data = exchange_buffer(conn, negotiation_params).await?;
 
     S7ProtocolHeader::try_from(&mut exchanged_data)?.is_ack_with_data()?;
@@ -60,10 +60,11 @@ pub(crate) async fn negotiate_connection_params(
 
 pub(crate) async fn send_buffer(conn: &mut TcpStream, data: BytesMut) -> Result<(), Error> {
     // Telegram length
-    let iso_len = mem::size_of::<TTPKTHeader>()     // TPKT Header
-                + mem::size_of::<COTPData>()        // COTP Header Size
-                + data.len(); // S7 params
-    let tpkt_header = TTPKTHeader::build(iso_len as u16);
+    let iso_len = u16::from(TTPKTHeader::len())  // TPKT Header
+                + u16::from(COTPData::len())                       // COTP Header Size
+                + u16::try_from(data.len()) // S7 params
+            .map_err(|_| Error::DataItemTooLarge)?;
+    let tpkt_header = TTPKTHeader::build(iso_len);
     let cotp = COTPData::build();
 
     // construct data

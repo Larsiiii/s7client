@@ -77,8 +77,8 @@ impl Tsap {
     fn build(s7_type: S7Types) -> Vec<u8> {
         let tsap_info = s7_type.to_tsap_info();
         let dst_tsap = ((ConnectionType::PG as u16) << 8)
-            + (tsap_info.rack as u16 * 0x20)
-            + tsap_info.slot as u16;
+            + (u16::from(tsap_info.rack) * 0x20)
+            + u16::from(tsap_info.slot);
         vec![
             0xC1,                  // code that identifies source TSAP
             2,                     // source TSAP Len
@@ -109,7 +109,7 @@ impl TTPKTHeader {
         }
     }
 
-    pub(crate) fn len() -> usize {
+    pub(crate) fn len() -> u8 {
         4
     }
 }
@@ -119,7 +119,7 @@ impl TryFrom<&mut BytesMut> for TTPKTHeader {
 
     fn try_from(bytes: &mut BytesMut) -> Result<Self, Self::Error> {
         // check if there are enough bytes for a header
-        if bytes.len() >= Self::len() {
+        if bytes.len() >= usize::from(Self::len()) {
             Ok(Self {
                 version: bytes.get_u8(),
                 reserved: bytes.get_u8(),
@@ -358,13 +358,13 @@ pub(crate) struct COTPData {
 }
 
 impl COTPData {
-    pub(crate) fn len() -> usize {
+    pub(crate) fn len() -> u8 {
         3
     }
 
     pub(crate) fn build() -> Self {
         COTPData {
-            header_length: mem::size_of::<COTPData>() as u8 - 1,
+            header_length: COTPData::len() - 1,
             pdu_type: PDU_TYPE_DT,
             eot_num: PDU_EOT,
         }
@@ -393,7 +393,7 @@ impl TryFrom<Vec<u8>> for COTPData {
     type Error = Error;
 
     fn try_from(bytes: Vec<u8>) -> Result<Self, Self::Error> {
-        match bytes.len() as usize {
+        match bytes.len() {
             3 => Ok(Self {
                 header_length: bytes[0],
                 pdu_type: bytes[1],
@@ -412,7 +412,7 @@ impl TryFrom<&mut BytesMut> for COTPData {
 
     fn try_from(bytes: &mut BytesMut) -> Result<Self, Self::Error> {
         // check if there are enough bytes for a header
-        if bytes.len() >= Self::len() {
+        if bytes.len() >= usize::from(Self::len()) {
             Ok(Self {
                 header_length: bytes.get_u8(),
                 pdu_type: bytes.get_u8(),
@@ -453,14 +453,14 @@ pub(super) struct IsoControlPDU {
 impl IsoControlPDU {
     pub(crate) fn build(pdu_size: u32, s7_type: S7Types) -> Self {
         // Params length
-        let par_len = 11; // 2 Src TSAP (Code+field Len)      +
-                          // 2 Src TSAP len                   +
-                          // 2 Dst TSAP (Code+field Len)      +
-                          // 2 Src TSAP len                   +
-                          // 3 PDU size (Code+field Len+Val)  = 11
-                          // Telegram length
-        let iso_len = mem::size_of::<TTPKTHeader>()     // TPKT Header
-                    + 7                                 // COTP Header Size without params
+        let par_len = 11_u8; // 2 Src TSAP (Code+field Len)      +
+                             // 2 Src TSAP len                   +
+                             // 2 Dst TSAP (Code+field Len)      +
+                             // 2 Src TSAP len                   +
+                             // 3 PDU size (Code+field Len+Val)  = 11
+                             // Telegram length
+        let iso_len = TTPKTHeader::len()     // TPKT Header
+                    + 7                          // COTP Header Size without params
                     + par_len; // COTP params
 
         let cotp = COTPConnection {
@@ -472,17 +472,16 @@ impl IsoControlPDU {
                     256 => 0x08,
                     512 => 0x09,
                     1024 => 0x0A,
-                    2048 => 0x0B,
                     4096 => 0x0C,
                     8192 => 0x0D,
-                    _ => 0x0B, // Our Default
+                    2048 | _ => 0x0B, // Our Default
                 },
                 tsap: Tsap::build(s7_type),
             },
-            header_length: par_len as u8 + 6, // <-- 6 = 7 - 1 (COTP Header size - 1)
-            pdu_type: PDU_TYPE_CR,            // Connection Request
-            dst_ref: DST_REF,                 // Destination reference
-            src_ref: SRC_REF,                 // Source reference
+            header_length: par_len + 6, // <-- 6 = 7 - 1 (COTP Header size - 1)
+            pdu_type: PDU_TYPE_CR,      // Connection Request
+            dst_ref: DST_REF,           // Destination reference
+            src_ref: SRC_REF,           // Source reference
             co_r: 0x00, // Class + Option : RFC0983 states that it must be always 0x40
                         // but for some equipment (S7) must be 0 in disaccord of specifications !!!
         };
@@ -490,7 +489,7 @@ impl IsoControlPDU {
         let header = TTPKTHeader {
             version: ISO_TCP_VERSION,
             reserved: 0,
-            length: iso_len as u16,
+            length: u16::from(iso_len),
         };
 
         IsoControlPDU {

@@ -1,12 +1,14 @@
 use bytes::{BufMut, BytesMut};
 use std::convert::TryFrom;
-use std::mem;
 use tokio::net::TcpStream;
 
-use super::header::S7ProtocolHeader;
-use super::types::{Area, DataItem, ReadWriteParams, RequestItem, S7DataTypes, READ_OPERATION};
+use super::segments::{
+    data_item::DataItem, header::S7ProtocolHeader, parameters::ReadWriteParams,
+    request_item::RequestItem,
+};
+use super::types::{Area, READ_OPERATION};
 use crate::connection::tcp::exchange_buffer;
-use crate::errors::{Error, IsoError, S7ProtocolError};
+use crate::errors::{Error, S7ProtocolError};
 use crate::S7ReadAccess;
 
 impl ReadWriteParams {
@@ -19,90 +21,148 @@ impl ReadWriteParams {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(crate) async fn read_area(
-    conn: &mut TcpStream,
-    pdu_length: u16,
-    pdu_number: &mut u16,
-    area: Area,
-    db_number: u16,
-    start: u32,
-    size: u32,
-    data_type: S7DataTypes,
-) -> Result<Vec<u8>, Error> {
-    // Each packet cannot exceed the PDU length (in bytes) negotiated, and moreover
-    // we must ensure to transfer a "finite" number of item per PDU
-    // Protocol header size (should be 18)
-    let header_size = (mem::size_of::<S7ProtocolHeader>() - 2) - 6; // -6 to account for options
-    let requested_size = size * data_type.get_size();
-    if ((pdu_length as i32 - header_size as i32) / data_type.get_size() as i32) < 1 {
-        return Err(Error::ISORequest(IsoError::InvalidPDU));
-    }
-    let max_elements = (pdu_length as usize - header_size) as u32 / data_type.get_size();
-
-    let mut buffer: Vec<u8> = Vec::new();
-    let mut offset = 0;
-    while offset == 0 || offset < requested_size {
-        let items_to_request: u32 = match requested_size - offset {
-            x if x > max_elements => max_elements,
-            _ => size - offset,
-        };
-        let items = RequestItem::build(
-            area,
-            db_number,
-            start + offset,
-            data_type,
-            items_to_request as u16,
-        );
-        let request_params = BytesMut::from(ReadWriteParams::build_read(vec![items]));
-
-        // create data buffer
-        let mut bytes = BytesMut::new();
-
-        let s7_header = S7ProtocolHeader::build_request(pdu_number, request_params.len() as u16, 0);
-        bytes.put(BytesMut::from(s7_header));
-        bytes.put(request_params);
-
-        let mut read_data = exchange_buffer(conn, bytes).await?;
-        let response = S7ProtocolHeader::try_from(&mut read_data)?;
-        // check if s7 header is ack with data and check for errors
-        // check if pdu of response matches request pdu
-        let response = response
-            .is_ack_with_data()?
-            .is_current_pdu_response(*pdu_number)?;
-
-        // Check for errors
-        if response.has_error() {
-            let (class, code) = response.get_errors();
-            return Err(Error::S7ProtocolError(S7ProtocolError::from_codes(
-                class, code,
-            )));
-        }
-        let _read_params = ReadWriteParams::from(&mut read_data);
-        let mut data_item = DataItem::try_from(&mut read_data)?;
-        offset += data_item.data.len() as u32;
-        buffer.append(&mut data_item.data);
+fn assert_pdu_size_for_read(
+    data_items: &Vec<S7ReadAccess>,
+    max_pdu_size: usize,
+) -> Result<(), Error> {
+    // send request limit: 19 bytes of header data, 12 bytes of parameter data for each dataItem
+    let request_size = 19 + data_items.len() * RequestItem::len();
+    if request_size > max_pdu_size {
+        return Err(Error::TooManyItemsInOneRequest);
     }
 
-    Ok(buffer)
+    // response limit: 14 bytes of header data, 4 bytes of result data for each dataItem and the actual data
+    let response_size = calculate_response_size(data_items);
+    if response_size > max_pdu_size {
+        return Err(Error::ResponseDataWouldBeTooLarge {
+            req_size: response_size,
+            max_pdu: max_pdu_size,
+        });
+    }
+
+    Ok(())
 }
 
-pub(crate) async fn read_area2(
+fn calculate_response_size(data_items: &Vec<S7ReadAccess>) -> usize {
+    data_items
+        .iter()
+        .map(|item| usize::from(item.len()))
+        .sum::<usize>()
+        + data_items.len() * DataItem::header_len()
+        + 14
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn read_area_single(
     conn: &mut TcpStream,
-    pdu_length: u16,
+    max_pdu_size: u16,
     pdu_number: &mut u16,
     area: Area,
-    info: Vec<S7ReadAccess>,
-) -> Result<Vec<Result<Vec<u8>, Error>>, Error> {
-    // Each S7 PDU (Header + Parameters + Data) must not exceed the maximum PDU length (bytes) negotiated with the
+    data_item: S7ReadAccess,
+) -> Result<Vec<u8>, Error> {
+    // Each PDU (TPKT Header + COTP Header + S7Header + S7Parameters + S7Data) must not exceed the maximum PDU length (bytes) negotiated with the
     // PLC during connection.
     // Moreover we must ensure that a "finite" number of items is send per PDU. If the command size does not fit in one PDU
     // then it must be split across more subsequent PDU.
 
-    // check if all items fit into one PDU
-    if (info.len() * RequestItem::len()) + ReadWriteParams::len() + S7ProtocolHeader::len_request()
-        > pdu_length as usize
-    {}
+    let max_pdu_size_usize = usize::from(max_pdu_size);
+
+    let response_size = calculate_response_size(&vec![data_item]);
+    let items = if response_size > max_pdu_size_usize {
+        // split request into multiple each smaller than the max PDU size
+        // max data size per request (1 item per request)
+        // 12 bytes of header data, 2 bytes of param header, 4 bytes of result data for each dataItem and the actual data
+        let max_data_size = max_pdu_size_usize
+            - S7ProtocolHeader::len_response()
+            - ReadWriteParams::len()
+            - DataItem::header_len();
+
+        let (item_count_required, rest) = (
+            usize::from(data_item.len()) / max_data_size,
+            usize::from(data_item.len()) % max_data_size,
+        );
+
+        // create multiple items for request
+        let mut items: Vec<S7ReadAccess> = (0..item_count_required)
+            .map(|i| S7ReadAccess::Bytes {
+                db_number: data_item.db_number(),
+                start: (i * max_data_size) as u32 + data_item.start(),
+                length: max_data_size as u16,
+            })
+            .collect();
+
+        // add rest of data for request
+        if rest > 0 {
+            items.push(S7ReadAccess::Bytes {
+                db_number: data_item.db_number(),
+                start: ((item_count_required) * max_data_size) as u32 + data_item.start(),
+                length: rest as u16,
+            });
+        }
+
+        items
+    } else {
+        vec![data_item]
+    };
+
+    let mut overall_response_data = BytesMut::new();
+
+    for req in items {
+        let request_item = RequestItem::build(
+            area,
+            req.db_number(),
+            req.start(),
+            req.data_type(),
+            req.len().into(),
+        )?;
+        let request_params = BytesMut::from(ReadWriteParams::build_read(vec![request_item]));
+
+        // create data buffer
+        let mut bytes = BytesMut::new();
+
+        let req_header = S7ProtocolHeader::build_request(pdu_number, request_params.len(), 0)?;
+        bytes.put(BytesMut::from(req_header));
+        bytes.put(request_params);
+
+        let mut response = exchange_buffer(conn, bytes).await?;
+
+        // check if s7 header is ack with data and check for errors
+        // check if pdu of response matches request pdu
+        let resp_header = S7ProtocolHeader::try_from(&mut response)?;
+        resp_header
+            .is_ack_with_data()?
+            .is_current_pdu_response(*pdu_number)?;
+
+        // Check for errors
+        if resp_header.has_error() {
+            let (class, code) = resp_header.get_errors();
+            return Err(Error::S7ProtocolError(S7ProtocolError::from_codes(
+                class, code,
+            )));
+        }
+
+        // get data
+        let _read_params = ReadWriteParams::from(&mut response);
+        let data_item = DataItem::try_from(&mut response)?;
+        overall_response_data.put(data_item.data.as_ref());
+    }
+
+    Ok(overall_response_data.to_vec())
+}
+
+pub(crate) async fn read_area_multi(
+    conn: &mut TcpStream,
+    max_pdu_size: u16,
+    pdu_number: &mut u16,
+    area: Area,
+    info: Vec<S7ReadAccess>,
+) -> Result<Vec<Result<Vec<u8>, Error>>, Error> {
+    // Each PDU (TPKT Header + COTP Header + S7Header + S7Parameters + S7Data) must not exceed the maximum PDU length (bytes) negotiated with the
+    // PLC during connection.
+    // Moreover we must ensure that a "finite" number of items is send per PDU. If the command size does not fit in one PDU
+    // then it must be split across more subsequent PDU.
+
+    assert_pdu_size_for_read(&info, max_pdu_size.into())?;
 
     let request_params = BytesMut::from(ReadWriteParams::build_read(
         info.iter()
@@ -112,41 +172,42 @@ pub(crate) async fn read_area2(
                     info.db_number(),
                     info.start(),
                     info.data_type(),
-                    info.len() as u16,
+                    info.len().into(),
                 )
             })
-            .collect(),
+            .collect::<Result<Vec<RequestItem>, Error>>()?,
     ));
 
     // create data buffer
     let mut bytes = BytesMut::new();
 
-    let s7_header = S7ProtocolHeader::build_request(pdu_number, request_params.len() as u16, 0);
-    bytes.put(BytesMut::from(s7_header));
+    let req_header = S7ProtocolHeader::build_request(pdu_number, request_params.len(), 0)?;
+    bytes.put(BytesMut::from(req_header));
     bytes.put(request_params);
 
-    let mut read_data = exchange_buffer(conn, bytes).await?;
-    let response = S7ProtocolHeader::try_from(&mut read_data)?;
+    let mut response = exchange_buffer(conn, bytes).await?;
+
     // check if s7 header is ack with data and check for errors
     // check if pdu of response matches request pdu
-    let response = response
+    let resp_header = S7ProtocolHeader::try_from(&mut response)?;
+    resp_header
         .is_ack_with_data()?
         .is_current_pdu_response(*pdu_number)?;
 
     // Check for errors
-    if response.has_error() {
-        let (class, code) = response.get_errors();
+    if resp_header.has_error() {
+        let (class, code) = resp_header.get_errors();
         return Err(Error::S7ProtocolError(S7ProtocolError::from_codes(
             class, code,
         )));
     }
 
     // get response data
-    let read_params = ReadWriteParams::from(&mut read_data);
+    let read_params = ReadWriteParams::from(&mut response);
     let data = (0..read_params.item_count)
-        .map(|_| DataItem::try_from(&mut read_data))
+        .map(|_| DataItem::try_from(&mut response))
         .map(|item| match item {
-            Ok(item) => Ok(item.data),
+            Ok(item) => Ok(item.data.to_vec()),
             Err(e) => Err(e),
         })
         .collect::<Vec<Result<Vec<u8>, Error>>>();

@@ -19,6 +19,10 @@ pub enum Error {
     S7ProtocolError(S7ProtocolError),
     DataItemError(S7DataItemResponseError),
     ResponseDoesNotBelongToCurrentPDU,
+    TooManyItemsInOneRequest,
+    DataItemTooLarge,
+    TooMuchDataToWrite,
+    ResponseDataWouldBeTooLarge { req_size: usize, max_pdu: usize },
 }
 
 impl From<IOError> for Error {
@@ -53,6 +57,11 @@ impl fmt::Display for Error {
                 Error::DataItemError(e) => e.to_string(),
                 Error::ResponseDoesNotBelongToCurrentPDU =>
                     "Mismatch in response and request ID".to_string(),
+                Error::TooManyItemsInOneRequest => "Too many items in one request".to_string(),
+                Error::DataItemTooLarge => "The data item in the request is too large".to_string(),
+                Error::TooMuchDataToWrite =>
+                    "Too much data supplied for one write request".to_string(),
+                    Error::ResponseDataWouldBeTooLarge { req_size, max_pdu } => format!("Too much data requested for one read request. Response size ({req_size}) is larger than the protocol limit ({max_pdu})")
             }
         )
     }

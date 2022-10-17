@@ -30,15 +30,19 @@ pub(crate) struct S7ProtocolHeader {
 }
 
 impl S7ProtocolHeader {
-    pub(crate) fn len_request() -> usize {
+    pub(crate) fn _len_request() -> usize {
         10
+    }
+
+    pub(crate) fn len_response() -> usize {
+        12
     }
 
     pub(crate) fn build_request(
         pdu_ref: &mut u16,
-        parameter_length: u16,
-        data_length: u16,
-    ) -> Self {
+        parameter_length: usize,
+        data_length: usize,
+    ) -> Result<Self, Error> {
         // increase or reset counter for pdu reference
         *pdu_ref = if *pdu_ref == u16::MAX {
             0
@@ -47,16 +51,17 @@ impl S7ProtocolHeader {
         };
 
         // build S7 protocol header
-        Self {
+        Ok(Self {
             protocol_id: 0x32,
             message_type: JOB_REQUEST,
             reserved: 0x0000,
             pdu_reference: *pdu_ref,
-            parameter_length,
-            data_length,
+            parameter_length: u16::try_from(parameter_length)
+                .map_err(|_| Error::TooManyItemsInOneRequest)?,
+            data_length: u16::try_from(data_length).map_err(|_| Error::DataItemTooLarge)?,
             error_class: None,
             error_code: None,
-        }
+        })
     }
 
     pub(crate) fn is_ack(&self) -> Result<&Self, Error> {

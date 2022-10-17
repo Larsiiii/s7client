@@ -1,7 +1,10 @@
 use std::net::Ipv4Addr;
 
 use crate::{errors::Error, S7Client, S7Types};
-use deadpool::{async_trait, managed};
+use deadpool::{
+    async_trait,
+    managed::{self, BuildError},
+};
 use tokio::sync::Mutex;
 
 #[derive(Debug, Clone, Copy)]
@@ -55,19 +58,20 @@ impl S7Pool {
     /// use s7client::{S7Pool, S7Types};
     ///
     /// // create S7 pool
-    /// let mut pool = S7Pool::new(Ipv4Addr::new(127, 0, 0, 1), S7Types::S71200);
+    /// let mut pool = S7Pool::new(Ipv4Addr::new(127, 0, 0, 1), S7Types::S71200)
+    ///     .expect("Could not create pool");
     /// ```
-    pub fn new(ip: Ipv4Addr, s7_type: S7Types) -> Self {
+    /// # Errors
+    ///
+    /// Will return `Error` if the `Pool` could not be created.
+    pub fn new(ip: Ipv4Addr, s7_type: S7Types) -> Result<Self, BuildError<Error>> {
         let mgr = S7PoolManager {
             s7_ip: ip,
             s7_type,
             s7_info: Mutex::new(None),
         };
-        let pool = S7PooledConnection::builder(mgr)
-            .max_size(3)
-            .build()
-            .unwrap();
+        let pool = S7PooledConnection::builder(mgr).max_size(3).build()?;
 
-        S7Pool(pool)
+        Ok(S7Pool(pool))
     }
 }

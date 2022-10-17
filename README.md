@@ -27,7 +27,7 @@ let mut client = S7Client::new(Ipv4Addr::new(127, 0, 0, 1), S7Types::S71200)
     .expect("Could not create S7 Client");
 
 // read some data
-let data = client.db_read(100, 0, 4).await.expect("Could not read from S7 client");
+let data = client.db_read(100, 0, 4).await.expect("Could not read from S7 PLC");
 ```
 
 ### Connection via a pooled connection
@@ -39,5 +39,5 @@ use s7client::{S7Pool, S7Types};
 let mut client = S7Pool::new(Ipv4Addr::new(127, 0, 0, 1), S7Types::S71200);
 
 // read some data
-let data = client.db_read(100, 0, 4).await.expect("Could not read from S7 client");
+let data = client.db_read(100, 0, 4).await.expect("Could not read from S7 PLC");
 ```

@@ -1,11 +1,10 @@
 use std::convert::TryFrom;
-use std::mem;
 
 use bytes::{Buf, BufMut, BytesMut};
 
 use crate::errors::Error;
 
-use super::header::S7ProtocolHeader;
+use super::segments::header::S7ProtocolHeader;
 
 pub(crate) const NEGOTIATE_FUNCTION_CODE: u8 = 0xf0;
 
@@ -16,15 +15,11 @@ pub(crate) struct S7Negotiation {
 }
 
 impl S7Negotiation {
-    pub(crate) fn build() -> S7Negotiation {
-        Self {
-            s7_header: S7ProtocolHeader::build_request(
-                &mut 0,
-                mem::size_of::<NegotiatePDUParameters>() as u16,
-                0,
-            ),
+    pub(crate) fn build() -> Result<S7Negotiation, Error> {
+        Ok(Self {
+            s7_header: S7ProtocolHeader::build_request(&mut 0, NegotiatePDUParameters::len(), 0)?,
             params: NegotiatePDUParameters::build(),
-        }
+        })
     }
 }
 

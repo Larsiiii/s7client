@@ -35,6 +35,9 @@ impl S7Client {
     ///    .await
     ///    .expect("Could not create S7 Client");
     /// ```
+    /// # Errors
+    ///
+    /// Will return `Error` if no connection could be established to the PLC.
     pub async fn new(ip: Ipv4Addr, s7_type: S7Types) -> Result<Self, Error> {
         let tcp_client = match timeout(
             CONNECTION_TIMEOUT,
@@ -66,6 +69,9 @@ impl S7Client {
     /// Manually trigger negotiation of connection parameters
     ///
     /// This is not necessary as the parameters get checked before a request is send to the PLC
+    /// # Errors
+    ///
+    /// Will return `Error` if no connection could be established to the PLC.
     pub async fn connect(&mut self) -> Result<(), Error> {
         let connection_parameters = connect(&mut self.connection, self.s7_type).await?;
 
@@ -77,6 +83,9 @@ impl S7Client {
     }
 
     /// Gracefully disconnect from the PLC
+    /// # Errors
+    ///
+    /// Will return `Error` if the connection to the PLC could not be closed gracefully.
     pub async fn disconnect(&mut self) -> Result<(), Error> {
         disconnect(&mut self.connection).await?;
         self.reset_connection_info();
