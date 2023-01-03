@@ -52,7 +52,7 @@ impl fmt::Display for Error {
                 Error::ISORequest(e) => format!("ISO Request Error: {e}"),
                 Error::RequestedBitOutOfRange =>
                     "The request bit is out of range [0..7]".to_string(),
-                Error::RequestNotAcknowledged => "The PLC did not respond successful".to_string(),
+                Error::RequestNotAcknowledged => "The PLC did not respond successfully".to_string(),
                 Error::S7ProtocolError(e) => e.to_string(),
                 Error::DataItemError(e) => e.to_string(),
                 Error::ResponseDoesNotBelongToCurrentPDU =>
@@ -66,6 +66,8 @@ impl fmt::Display for Error {
         )
     }
 }
+
+impl std::error::Error for Error {}
 
 #[derive(Debug)]
 pub enum IsoError {
@@ -196,5 +198,27 @@ impl From<u8> for S7DataItemResponseError {
             0x0a => Self::ObjectDoesNotExist,
             _ => Self::Unknown,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use error_stack::{IntoReport, Report, ResultExt};
+
+    use super::*;
+
+    #[test]
+    fn error_stack() {
+        println!("{:?}", create_error_stack());
+    }
+
+    fn create_error_stack() -> Result<(), Report<Error>> {
+        create_error()
+            .into_report()
+            .change_context(Error::RequestedBitOutOfRange)
+    }
+
+    fn create_error() -> Result<(), Error> {
+        Err(Error::RequestNotAcknowledged)
     }
 }

@@ -12,3 +12,4 @@ bytes = "1.2.1"
 
 [dev-dependencies]
 tokio = { version = "1.20", features = ["rt", "macros"] }
+error-stack = "0.2"
