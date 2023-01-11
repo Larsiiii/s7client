@@ -45,7 +45,7 @@ struct TSAPInfo {
 }
 
 /// Supported PLC devices from the S7 family
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum S7Types {
     /// Choose this if you want to connect to a S7 200
     S7200,
