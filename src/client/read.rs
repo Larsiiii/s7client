@@ -29,11 +29,9 @@ impl S7Client {
         start: u32,
         length: u16,
     ) -> Result<Vec<u8>, Error> {
-        self.validate_connection_info().await;
+        self.validate_connection_info().await?;
         read_area_single(
-            &mut self.connection,
-            self.pdu_length,
-            &mut self.pdu_number,
+            self,
             Area::DataBlock,
             S7ReadAccess::Bytes {
                 db_number,
@@ -58,14 +56,12 @@ impl S7Client {
     ///
     /// Will return `Error` if any errors occurred during reading.
     pub async fn db_read_bit(&mut self, db_number: u16, byte: u32, bit: u8) -> Result<bool, Error> {
-        self.validate_connection_info().await;
+        self.validate_connection_info().await?;
         if bit > 7 {
             Err(Error::RequestedBitOutOfRange)
         } else {
-            Ok(read_area_single(
-                &mut self.connection,
-                self.pdu_length,
-                &mut self.pdu_number,
+            match read_area_single(
+                self,
                 Area::DataBlock,
                 S7ReadAccess::Bit {
                     db_number,
@@ -73,8 +69,16 @@ impl S7Client {
                     bit,
                 },
             )
-            .await?[0]
-                > 0)
+            .await
+            {
+                Ok(result) => Ok(result[0] > 0),
+                Err(error) => {
+                    if error.is_connection_error() {
+                        self.reset_connection_info();
+                    }
+                    Err(error)
+                }
+            }
         }
     }
 
@@ -82,16 +86,9 @@ impl S7Client {
         &mut self,
         info: Vec<S7ReadAccess>,
     ) -> Result<Vec<Result<Vec<u8>, Error>>, Error> {
-        self.validate_connection_info().await;
+        self.validate_connection_info().await?;
 
-        read_area_multi(
-            &mut self.connection,
-            self.pdu_length,
-            &mut self.pdu_number,
-            Area::DataBlock,
-            info,
-        )
-        .await
+        read_area_multi(self, Area::DataBlock, info).await
     }
 
     /// Read a defined number of bytes from the 'Merker area' of the PLC with a certain offset
@@ -107,11 +104,9 @@ impl S7Client {
     ///
     /// Will return `Error` if any errors occurred during reading.
     pub async fn mb_read(&mut self, start: u32, length: u16) -> Result<Vec<u8>, Error> {
-        self.validate_connection_info().await;
+        self.validate_connection_info().await?;
         read_area_single(
-            &mut self.connection,
-            self.pdu_length,
-            &mut self.pdu_number,
+            self,
             Area::Merker,
             S7ReadAccess::Bytes {
                 db_number: 0,
@@ -135,11 +130,9 @@ impl S7Client {
     ///
     /// Will return `Error` if any errors occurred during reading.
     pub async fn i_read(&mut self, start: u32, length: u16) -> Result<Vec<u8>, Error> {
-        self.validate_connection_info().await;
+        self.validate_connection_info().await?;
         read_area_single(
-            &mut self.connection,
-            self.pdu_length,
-            &mut self.pdu_number,
+            self,
             Area::ProcessInput,
             S7ReadAccess::Bytes {
                 db_number: 0,
@@ -163,11 +156,9 @@ impl S7Client {
     ///
     /// Will return `Error` if any errors occurred during reading.
     pub async fn o_read(&mut self, start: u32, length: u16) -> Result<Vec<u8>, Error> {
-        self.validate_connection_info().await;
+        self.validate_connection_info().await?;
         read_area_single(
-            &mut self.connection,
-            self.pdu_length,
-            &mut self.pdu_number,
+            self,
             Area::ProcessOutput,
             S7ReadAccess::Bytes {
                 db_number: 0,

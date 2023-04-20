@@ -24,11 +24,9 @@ impl S7Client {
         start: u32,
         data: &Vec<u8>,
     ) -> Result<(), Error> {
-        self.validate_connection_info().await;
+        self.validate_connection_info().await?;
         write_area_single(
-            &mut self.connection,
-            self.pdu_length,
-            &mut self.pdu_number,
+            self,
             Area::DataBlock,
             S7WriteAccess::Bytes {
                 db_number,
@@ -59,14 +57,12 @@ impl S7Client {
         bit: u8,
         value: bool,
     ) -> Result<(), Error> {
-        self.validate_connection_info().await;
+        self.validate_connection_info().await?;
         if bit > 7 {
             Err(Error::RequestedBitOutOfRange)
         } else {
             write_area_single(
-                &mut self.connection,
-                self.pdu_length,
-                &mut self.pdu_number,
+                self,
                 Area::DataBlock,
                 S7WriteAccess::Bit {
                     db_number,
@@ -85,14 +81,7 @@ impl S7Client {
     ) -> Result<Vec<Result<(), Error>>, Error> {
         self.validate_connection_info().await;
 
-        write_area_multi(
-            &mut self.connection,
-            self.pdu_length,
-            &mut self.pdu_number,
-            Area::DataBlock,
-            info,
-        )
-        .await
+        write_area_multi(self, Area::DataBlock, info).await
     }
 
     /// Write a defined number of bytes to the 'Merker area' of the PLC with a certain offset
@@ -108,11 +97,9 @@ impl S7Client {
     ///
     /// Will return `Error` if any errors occurred during writing.
     pub async fn mb_write(&mut self, start: u32, data: &Vec<u8>) -> Result<(), Error> {
-        self.validate_connection_info().await;
+        self.validate_connection_info().await?;
         write_area_single(
-            &mut self.connection,
-            self.pdu_length,
-            &mut self.pdu_number,
+            self,
             Area::Merker,
             S7WriteAccess::Bytes {
                 db_number: 0,
@@ -136,11 +123,9 @@ impl S7Client {
     ///
     /// Will return `Error` if any errors occurred during writing.
     pub async fn i_write(&mut self, start: u32, data: &Vec<u8>) -> Result<(), Error> {
-        self.validate_connection_info().await;
+        self.validate_connection_info().await?;
         write_area_single(
-            &mut self.connection,
-            self.pdu_length,
-            &mut self.pdu_number,
+            self,
             Area::ProcessInput,
             S7WriteAccess::Bytes {
                 db_number: 0,
@@ -164,11 +149,9 @@ impl S7Client {
     ///
     /// Will return `Error` if any errors occurred during writing.
     pub async fn o_write(&mut self, start: u32, data: &Vec<u8>) -> Result<(), Error> {
-        self.validate_connection_info().await;
+        self.validate_connection_info().await?;
         write_area_single(
-            &mut self.connection,
-            self.pdu_length,
-            &mut self.pdu_number,
+            self,
             Area::ProcessOutput,
             S7WriteAccess::Bytes {
                 db_number: 0,

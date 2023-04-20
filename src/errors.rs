@@ -69,6 +69,19 @@ impl fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
+impl Error {
+    pub(crate) fn is_connection_error(&self) -> bool {
+        match self {
+            Error::IO(_)
+            | Error::Connection(_)
+            | Error::DataExchangeTimedOut
+            | Error::ISOResponse(_)
+            | Error::ISORequest(_) => true,
+            _ => false,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum IsoError {
     Connect = 0x0001_0000,         // Connection error

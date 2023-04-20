@@ -1,6 +1,5 @@
 use bytes::{BufMut, BytesMut};
 use std::convert::TryFrom;
-use tokio::net::TcpStream;
 
 use super::segments::{
     data_item::DataItem, header::S7ProtocolHeader, parameters::ReadWriteParams,
@@ -9,7 +8,7 @@ use super::segments::{
 use super::types::{Area, READ_OPERATION};
 use crate::connection::tcp::exchange_buffer;
 use crate::errors::{Error, S7ProtocolError};
-use crate::S7ReadAccess;
+use crate::{S7Client, S7ReadAccess};
 
 impl ReadWriteParams {
     pub(super) fn build_read(items: Vec<RequestItem>) -> Self {
@@ -54,9 +53,7 @@ fn calculate_response_size(data_items: &Vec<S7ReadAccess>) -> usize {
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn read_area_single(
-    conn: &mut TcpStream,
-    max_pdu_size: u16,
-    pdu_number: &mut u16,
+    client: &mut S7Client,
     area: Area,
     data_item: S7ReadAccess,
 ) -> Result<Vec<u8>, Error> {
@@ -65,7 +62,7 @@ pub(crate) async fn read_area_single(
     // Moreover we must ensure that a "finite" number of items is send per PDU. If the command size does not fit in one PDU
     // then it must be split across more subsequent PDU.
 
-    let max_pdu_size_usize = usize::from(max_pdu_size);
+    let max_pdu_size_usize = usize::from(client.pdu_length);
 
     let response_size = calculate_response_size(&vec![data_item]);
     let items = if response_size > max_pdu_size_usize {
@@ -120,18 +117,19 @@ pub(crate) async fn read_area_single(
         // create data buffer
         let mut bytes = BytesMut::new();
 
-        let req_header = S7ProtocolHeader::build_request(pdu_number, request_params.len(), 0)?;
+        let req_header =
+            S7ProtocolHeader::build_request(&mut client.pdu_number, request_params.len(), 0)?;
         bytes.put(BytesMut::from(req_header));
         bytes.put(request_params);
 
-        let mut response = exchange_buffer(conn, bytes).await?;
+        let mut response = exchange_buffer(&mut client.connection, bytes).await?;
 
         // check if s7 header is ack with data and check for errors
         // check if pdu of response matches request pdu
         let resp_header = S7ProtocolHeader::try_from(&mut response)?;
         resp_header
             .is_ack_with_data()?
-            .is_current_pdu_response(*pdu_number)?;
+            .is_current_pdu_response(client.pdu_number)?;
 
         // Check for errors
         if resp_header.has_error() {
@@ -151,9 +149,7 @@ pub(crate) async fn read_area_single(
 }
 
 pub(crate) async fn read_area_multi(
-    conn: &mut TcpStream,
-    max_pdu_size: u16,
-    pdu_number: &mut u16,
+    client: &mut S7Client,
     area: Area,
     info: Vec<S7ReadAccess>,
 ) -> Result<Vec<Result<Vec<u8>, Error>>, Error> {
@@ -162,7 +158,7 @@ pub(crate) async fn read_area_multi(
     // Moreover we must ensure that a "finite" number of items is send per PDU. If the command size does not fit in one PDU
     // then it must be split across more subsequent PDU.
 
-    assert_pdu_size_for_read(&info, max_pdu_size.into())?;
+    assert_pdu_size_for_read(&info, client.pdu_length.into())?;
 
     let request_params = BytesMut::from(ReadWriteParams::build_read(
         info.iter()
@@ -181,18 +177,19 @@ pub(crate) async fn read_area_multi(
     // create data buffer
     let mut bytes = BytesMut::new();
 
-    let req_header = S7ProtocolHeader::build_request(pdu_number, request_params.len(), 0)?;
+    let req_header =
+        S7ProtocolHeader::build_request(&mut client.pdu_number, request_params.len(), 0)?;
     bytes.put(BytesMut::from(req_header));
     bytes.put(request_params);
 
-    let mut response = exchange_buffer(conn, bytes).await?;
+    let mut response = exchange_buffer(&mut client.connection, bytes).await?;
 
     // check if s7 header is ack with data and check for errors
     // check if pdu of response matches request pdu
     let resp_header = S7ProtocolHeader::try_from(&mut response)?;
     resp_header
         .is_ack_with_data()?
-        .is_current_pdu_response(*pdu_number)?;
+        .is_current_pdu_response(client.pdu_number)?;
 
     // Check for errors
     if resp_header.has_error() {

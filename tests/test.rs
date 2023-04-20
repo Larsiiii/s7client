@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use s7client::{S7Client, S7Pool, S7ReadAccess, S7Types, S7WriteAccess};
 use tokio::join;
 
@@ -125,7 +127,7 @@ async fn test_multi() {
     let res = client
         .db_read_multi(vec![
             S7ReadAccess::Bytes {
-                db_number: 0,
+                db_number: TEST_DB,
                 start: 0,
                 length: 300,
             },
@@ -151,7 +153,7 @@ async fn test_multi() {
     let res = client
         .db_write_multi(vec![
             S7WriteAccess::Bytes {
-                db_number: 0,
+                db_number: TEST_DB,
                 start: 0,
                 data: &10_u32.to_be_bytes().to_vec(),
             },
@@ -189,4 +191,18 @@ async fn test_read_split() {
         .expect("Could not read data from S7");
 
     assert_eq!(read_data.len(), 900);
+}
+
+#[tokio::test]
+async fn continuous_test() {
+    // create single s7 client object
+    let pool = S7Pool::new(std::net::Ipv4Addr::new(192, 168, 10, 72), S7Types::S71200)
+        .expect("Could not create pool");
+
+    loop {
+        // read data
+        println!("{:?}", pool.db_read_bit(TEST_DB, 0, 1).await);
+
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
 }

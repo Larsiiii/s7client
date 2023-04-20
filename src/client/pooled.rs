@@ -5,7 +5,7 @@ use deadpool::{
     async_trait,
     managed::{self, BuildError},
 };
-use tokio::sync::Mutex;
+use tokio::sync::RwLock;
 
 #[derive(Debug, Clone, Copy)]
 struct S7Info {
@@ -14,10 +14,20 @@ struct S7Info {
     max_amq_calle: u16,
 }
 
+impl From<&S7Client> for S7Info {
+    fn from(value: &S7Client) -> Self {
+        Self {
+            pdu_length: value.pdu_length,
+            max_amq_calle: value.max_amq_calle,
+            max_amq_caller: value.max_amq_caller,
+        }
+    }
+}
+
 pub(crate) struct S7PoolManager {
     s7_ip: Ipv4Addr,
     s7_type: S7Types,
-    s7_info: Mutex<Option<S7Info>>,
+    s7_info: RwLock<Option<S7Info>>,
 }
 
 #[async_trait]
@@ -27,20 +37,29 @@ impl managed::Manager for S7PoolManager {
 
     async fn create(&self) -> Result<S7Client, Error> {
         let mut client = S7Client::new(self.s7_ip, self.s7_type).await?;
-        let s7_info = self.s7_info.lock().await;
-        if let Some(info) = *s7_info {
+        let s7_info_reader = self.s7_info.read().await;
+        if let Some(info) = *s7_info_reader {
             client.pdu_length = info.pdu_length;
             client.max_amq_calle = info.max_amq_calle;
             client.max_amq_caller = info.max_amq_caller;
         } else {
+            drop(s7_info_reader);
             client.connect().await?;
+            let mut s7_info_writer = self.s7_info.write().await;
+            *s7_info_writer = Some(S7Info::from(&client));
         }
 
         Ok(client)
     }
 
-    async fn recycle(&self, _: &mut S7Client) -> managed::RecycleResult<Error> {
-        Ok(())
+    async fn recycle(&self, client: &mut S7Client) -> managed::RecycleResult<Error> {
+        if client.pdu_length == 0 {
+            let mut s7_info_writer = self.s7_info.write().await;
+            *s7_info_writer = None;
+            Err(managed::RecycleError::StaticMessage("Connection closed"))
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -68,7 +87,7 @@ impl S7Pool {
         let mgr = S7PoolManager {
             s7_ip: ip,
             s7_type,
-            s7_info: Mutex::new(None),
+            s7_info: RwLock::new(None),
         };
         let pool = S7PooledConnection::builder(mgr).max_size(3).build()?;
 

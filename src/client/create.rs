@@ -92,11 +92,11 @@ impl S7Client {
         Ok(())
     }
 
-    pub(crate) async fn validate_connection_info(&mut self) -> bool {
+    pub(crate) async fn validate_connection_info(&mut self) -> Result<(), Error> {
         if self.pdu_length == 0 {
-            let _connection = self.connect().await;
+            self.connect().await?;
         }
-        self.pdu_length > 0
+        Ok(())
     }
 
     pub(crate) fn reset_connection_info(&mut self) {

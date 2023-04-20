@@ -1,7 +1,6 @@
 use bytes::{Buf, BufMut, BytesMut};
 use std::borrow::Cow;
 use std::convert::TryFrom;
-use tokio::net::TcpStream;
 
 use super::segments::{
     data_item::DataItem, header::S7ProtocolHeader, parameters::ReadWriteParams,
@@ -10,7 +9,7 @@ use super::segments::{
 use super::types::{Area, DataItemTransportSize, WRITE_OPERATION};
 use crate::connection::{iso::TTPKTHeader, tcp::exchange_buffer};
 use crate::errors::{Error, S7DataItemResponseError, S7ProtocolError};
-use crate::S7WriteAccess;
+use crate::{S7Client, S7WriteAccess};
 
 impl ReadWriteParams {
     fn build_write(items: Vec<RequestItem>) -> Self {
@@ -70,9 +69,7 @@ fn assert_pdu_size_for_write<'a>(
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn write_area_single(
-    conn: &mut TcpStream,
-    pdu_length: u16,
-    pdu_number: &mut u16,
+    client: &mut S7Client,
     area: Area,
     data_item: S7WriteAccess<'_>,
 ) -> Result<(), Error> {
@@ -81,7 +78,7 @@ pub(crate) async fn write_area_single(
     // Moreover we must ensure that a "finite" number of items is send per PDU. If the command size does not fit in one PDU
     // then it must be split across more subsequent PDU.
 
-    assert_pdu_size_for_write(&vec![data_item], pdu_length.into())?;
+    assert_pdu_size_for_write(&vec![data_item], client.pdu_length.into())?;
 
     let request_params = BytesMut::from(ReadWriteParams::build_write(vec![RequestItem::build(
         area,
@@ -96,18 +93,23 @@ pub(crate) async fn write_area_single(
     // create data buffer
     let mut bytes = BytesMut::new();
 
-    let req_header =
-        S7ProtocolHeader::build_request(pdu_number, request_params.len(), data_items.len())?;
+    let req_header = S7ProtocolHeader::build_request(
+        &mut client.pdu_number,
+        request_params.len(),
+        data_items.len(),
+    )?;
     bytes.put(BytesMut::from(req_header));
     bytes.put(request_params);
     bytes.put(data_items);
 
-    let mut response = exchange_buffer(conn, bytes).await?;
+    let mut response = exchange_buffer(&mut client.connection, bytes).await?;
 
     // check if s7 header is ack with data and check for errors
     // check if pdu of response matches request pdu
     let resp_header = S7ProtocolHeader::try_from(&mut response)?;
-    resp_header.is_ack()?.is_current_pdu_response(*pdu_number)?;
+    resp_header
+        .is_ack()?
+        .is_current_pdu_response(client.pdu_number)?;
 
     // Check for errors
     if resp_header.has_error() {
@@ -131,9 +133,7 @@ pub(crate) async fn write_area_single(
 }
 
 pub(crate) async fn write_area_multi(
-    conn: &mut TcpStream,
-    pdu_length: u16,
-    pdu_number: &mut u16,
+    client: &mut S7Client,
     area: Area,
     info: Vec<S7WriteAccess<'_>>,
 ) -> Result<Vec<Result<(), Error>>, Error> {
@@ -142,7 +142,7 @@ pub(crate) async fn write_area_multi(
     // Moreover we must ensure that a "finite" number of items is send per PDU. If the command size does not fit in one PDU
     // then it must be split across more subsequent PDU.
 
-    assert_pdu_size_for_write(&info, pdu_length.into())?;
+    assert_pdu_size_for_write(&info, client.pdu_length.into())?;
 
     // build request
     let request_params = BytesMut::from(ReadWriteParams::build_write(
@@ -170,18 +170,23 @@ pub(crate) async fn write_area_multi(
     // create data buffer
     let mut bytes = BytesMut::new();
 
-    let req_header =
-        S7ProtocolHeader::build_request(pdu_number, request_params.len(), data_items.len())?;
+    let req_header = S7ProtocolHeader::build_request(
+        &mut client.pdu_number,
+        request_params.len(),
+        data_items.len(),
+    )?;
     bytes.put(BytesMut::from(req_header));
     bytes.put(request_params);
     bytes.put(data_items);
 
-    let mut response = exchange_buffer(conn, bytes).await?;
+    let mut response = exchange_buffer(&mut client.connection, bytes).await?;
 
     // check if s7 header is ack with data and check for errors
     // check if pdu of response matches request pdu
     let resp_header = S7ProtocolHeader::try_from(&mut response)?;
-    resp_header.is_ack()?.is_current_pdu_response(*pdu_number)?;
+    resp_header
+        .is_ack()?
+        .is_current_pdu_response(client.pdu_number)?;
 
     // Check for errors
     if resp_header.has_error() {
