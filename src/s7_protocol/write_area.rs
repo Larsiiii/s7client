@@ -11,13 +11,17 @@ use crate::connection::{iso::TTPKTHeader, tcp::exchange_buffer};
 use crate::errors::{Error, S7DataItemResponseError, S7ProtocolError};
 use crate::{S7Client, S7WriteAccess};
 
-impl ReadWriteParams {
-    fn build_write(items: Vec<RequestItem>) -> Self {
-        Self {
+impl<'a> ReadWriteParams<'a> {
+    fn build_write(items: &'a [RequestItem]) -> Result<Self, Error> {
+        Ok(Self {
             function_code: WRITE_OPERATION,
-            item_count: items.len() as u8,
+            item_count: if let Ok(item_count) = u8::try_from(items.len()) {
+                item_count
+            } else {
+                return Err(Error::TooManyItemsInOneRequest);
+            },
             request_item: Some(items),
-        }
+        })
     }
 }
 
@@ -47,7 +51,7 @@ impl<'a> DataItem<'a> {
 }
 
 fn assert_pdu_size_for_write<'a>(
-    data_items: &'a Vec<S7WriteAccess<'a>>,
+    data_items: &'a [S7WriteAccess<'a>],
     max_pdu_size: usize,
 ) -> Result<(), Error> {
     // 12 bytes of header data, 18 bytes of parameter data for each dataItem
@@ -67,7 +71,6 @@ fn assert_pdu_size_for_write<'a>(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(crate) async fn write_area_single(
     client: &mut S7Client,
     area: Area,
@@ -80,13 +83,13 @@ pub(crate) async fn write_area_single(
 
     assert_pdu_size_for_write(&vec![data_item], client.pdu_length.into())?;
 
-    let request_params = BytesMut::from(ReadWriteParams::build_write(vec![RequestItem::build(
+    let request_params = BytesMut::from(ReadWriteParams::build_write(&[RequestItem::build(
         area,
         data_item.db_number(),
         data_item.start(),
         data_item.data_type(),
         data_item.len(),
-    )?]));
+    )?])?);
     let data_items: BytesMut =
         DataItem::build_write2(data_item.data_type().into(), data_item.data())?.into();
 
@@ -106,14 +109,14 @@ pub(crate) async fn write_area_single(
 
     // check if s7 header is ack with data and check for errors
     // check if pdu of response matches request pdu
-    let resp_header = S7ProtocolHeader::try_from(&mut response)?;
-    resp_header
+    let response_header = S7ProtocolHeader::try_from(&mut response)?;
+    response_header
         .is_ack()?
         .is_current_pdu_response(client.pdu_number)?;
 
     // Check for errors
-    if resp_header.has_error() {
-        let (class, code) = resp_header.get_errors();
+    if response_header.has_error() {
+        let (class, code) = response_header.get_errors();
         return Err(Error::S7ProtocolError(S7ProtocolError::from_codes(
             class, code,
         )));
@@ -135,18 +138,19 @@ pub(crate) async fn write_area_single(
 pub(crate) async fn write_area_multi(
     client: &mut S7Client,
     area: Area,
-    info: Vec<S7WriteAccess<'_>>,
+    info: &[S7WriteAccess<'_>],
 ) -> Result<Vec<Result<(), Error>>, Error> {
     // Each PDU (TPKT Header + COTP Header + S7Header + S7Parameters + S7Data) must not exceed the maximum PDU length (bytes) negotiated with the
     // PLC during connection.
     // Moreover we must ensure that a "finite" number of items is send per PDU. If the command size does not fit in one PDU
     // then it must be split across more subsequent PDU.
 
-    assert_pdu_size_for_write(&info, client.pdu_length.into())?;
+    assert_pdu_size_for_write(info, client.pdu_length.into())?;
 
     // build request
     let request_params = BytesMut::from(ReadWriteParams::build_write(
-        info.iter()
+        &info
+            .iter()
             .map(|info| {
                 RequestItem::build(
                     area,
@@ -157,7 +161,7 @@ pub(crate) async fn write_area_multi(
                 )
             })
             .collect::<Result<Vec<RequestItem>, Error>>()?,
-    ));
+    )?);
     // build data items
     let data_items = info
         .iter()
@@ -183,14 +187,14 @@ pub(crate) async fn write_area_multi(
 
     // check if s7 header is ack with data and check for errors
     // check if pdu of response matches request pdu
-    let resp_header = S7ProtocolHeader::try_from(&mut response)?;
-    resp_header
+    let response_header = S7ProtocolHeader::try_from(&mut response)?;
+    response_header
         .is_ack()?
         .is_current_pdu_response(client.pdu_number)?;
 
     // Check for errors
-    if resp_header.has_error() {
-        let (class, code) = resp_header.get_errors();
+    if response_header.has_error() {
+        let (class, code) = response_header.get_errors();
         return Err(Error::S7ProtocolError(S7ProtocolError::from_codes(
             class, code,
         )));

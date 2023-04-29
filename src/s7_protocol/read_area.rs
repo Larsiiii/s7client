@@ -10,20 +10,23 @@ use crate::connection::tcp::exchange_buffer;
 use crate::errors::{Error, S7ProtocolError};
 use crate::{S7Client, S7ReadAccess};
 
-impl ReadWriteParams {
-    pub(super) fn build_read(items: Vec<RequestItem>) -> Self {
-        Self {
+impl<'a> ReadWriteParams<'a> {
+    pub(super) fn build_read(items: &'a [RequestItem]) -> Result<Self, Error> {
+        // ensure that item count fits in u8
+        Ok(Self {
             function_code: READ_OPERATION,
-            item_count: items.len() as u8,
+            item_count: if let Ok(item_count) = u8::try_from(items.len()) {
+                item_count
+            } else {
+                return Err(Error::TooManyItemsInOneRequest);
+            },
+            // items.len() as u8,
             request_item: Some(items),
-        }
+        })
     }
 }
 
-fn assert_pdu_size_for_read(
-    data_items: &Vec<S7ReadAccess>,
-    max_pdu_size: usize,
-) -> Result<(), Error> {
+fn assert_pdu_size_for_read(data_items: &[S7ReadAccess], max_pdu_size: usize) -> Result<(), Error> {
     // send request limit: 19 bytes of header data, 12 bytes of parameter data for each dataItem
     let request_size = 19 + data_items.len() * RequestItem::len();
     if request_size > max_pdu_size {
@@ -42,7 +45,8 @@ fn assert_pdu_size_for_read(
     Ok(())
 }
 
-fn calculate_response_size(data_items: &Vec<S7ReadAccess>) -> usize {
+fn calculate_response_size(data_items: &[S7ReadAccess]) -> usize {
+    // check for maximum data item size
     data_items
         .iter()
         .map(|item| usize::from(item.len()))
@@ -51,7 +55,6 @@ fn calculate_response_size(data_items: &Vec<S7ReadAccess>) -> usize {
         + 14
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(crate) async fn read_area_single(
     client: &mut S7Client,
     area: Area,
@@ -64,7 +67,7 @@ pub(crate) async fn read_area_single(
 
     let max_pdu_size_usize = usize::from(client.pdu_length);
 
-    let response_size = calculate_response_size(&vec![data_item]);
+    let response_size = calculate_response_size(&[data_item]);
     let items = if response_size > max_pdu_size_usize {
         // split request into multiple each smaller than the max PDU size
         // max data size per request (1 item per request)
@@ -80,6 +83,7 @@ pub(crate) async fn read_area_single(
         );
 
         // create multiple items for request
+        #[allow(clippy::cast_possible_truncation)]
         let mut items: Vec<S7ReadAccess> = (0..item_count_required)
             .map(|i| S7ReadAccess::Bytes {
                 db_number: data_item.db_number(),
@@ -90,6 +94,7 @@ pub(crate) async fn read_area_single(
 
         // add rest of data for request
         if rest > 0 {
+            #[allow(clippy::cast_possible_truncation)]
             items.push(S7ReadAccess::Bytes {
                 db_number: data_item.db_number(),
                 start: ((item_count_required) * max_data_size) as u32 + data_item.start(),
@@ -112,7 +117,7 @@ pub(crate) async fn read_area_single(
             req.data_type(),
             req.len().into(),
         )?;
-        let request_params = BytesMut::from(ReadWriteParams::build_read(vec![request_item]));
+        let request_params = BytesMut::from(ReadWriteParams::build_read(&[request_item])?);
 
         // create data buffer
         let mut bytes = BytesMut::new();
@@ -126,14 +131,14 @@ pub(crate) async fn read_area_single(
 
         // check if s7 header is ack with data and check for errors
         // check if pdu of response matches request pdu
-        let resp_header = S7ProtocolHeader::try_from(&mut response)?;
-        resp_header
+        let response_header = S7ProtocolHeader::try_from(&mut response)?;
+        response_header
             .is_ack_with_data()?
             .is_current_pdu_response(client.pdu_number)?;
 
         // Check for errors
-        if resp_header.has_error() {
-            let (class, code) = resp_header.get_errors();
+        if response_header.has_error() {
+            let (class, code) = response_header.get_errors();
             return Err(Error::S7ProtocolError(S7ProtocolError::from_codes(
                 class, code,
             )));
@@ -151,17 +156,18 @@ pub(crate) async fn read_area_single(
 pub(crate) async fn read_area_multi(
     client: &mut S7Client,
     area: Area,
-    info: Vec<S7ReadAccess>,
+    info: &[S7ReadAccess],
 ) -> Result<Vec<Result<Vec<u8>, Error>>, Error> {
     // Each PDU (TPKT Header + COTP Header + S7Header + S7Parameters + S7Data) must not exceed the maximum PDU length (bytes) negotiated with the
     // PLC during connection.
     // Moreover we must ensure that a "finite" number of items is send per PDU. If the command size does not fit in one PDU
     // then it must be split across more subsequent PDU.
 
-    assert_pdu_size_for_read(&info, client.pdu_length.into())?;
+    assert_pdu_size_for_read(info, client.pdu_length.into())?;
 
     let request_params = BytesMut::from(ReadWriteParams::build_read(
-        info.iter()
+        &info
+            .iter()
             .map(|info| {
                 RequestItem::build(
                     area,
@@ -172,7 +178,7 @@ pub(crate) async fn read_area_multi(
                 )
             })
             .collect::<Result<Vec<RequestItem>, Error>>()?,
-    ));
+    )?);
 
     // create data buffer
     let mut bytes = BytesMut::new();
@@ -186,14 +192,14 @@ pub(crate) async fn read_area_multi(
 
     // check if s7 header is ack with data and check for errors
     // check if pdu of response matches request pdu
-    let resp_header = S7ProtocolHeader::try_from(&mut response)?;
-    resp_header
+    let response_header = S7ProtocolHeader::try_from(&mut response)?;
+    response_header
         .is_ack_with_data()?
         .is_current_pdu_response(client.pdu_number)?;
 
     // Check for errors
-    if resp_header.has_error() {
-        let (class, code) = resp_header.get_errors();
+    if response_header.has_error() {
+        let (class, code) = response_header.get_errors();
         return Err(Error::S7ProtocolError(S7ProtocolError::from_codes(
             class, code,
         )));

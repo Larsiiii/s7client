@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use s7client::{S7Client, S7Pool, S7ReadAccess, S7Types, S7WriteAccess};
+use s7client::{errors::Error, S7Client, S7Pool, S7ReadAccess, S7Types, S7WriteAccess};
 use tokio::join;
 
 const TEST_DB: u16 = 1;
@@ -13,13 +13,13 @@ async fn create_connections() {
         .expect("Could not create S7 Client");
 
     let data = client
-        .db_read(0, 48, 4)
+        .db_read(TEST_DB, 48, 4)
         .await
         .expect("Could not read from S7 PLC");
     assert_eq!(data.len(), 4);
 
     let data2 = client
-        .db_read(0, 0, 1)
+        .db_read(TEST_DB, 0, 1)
         .await
         .expect("Could not read from S7 PLC");
     assert_eq!(data2.len(), 1);
@@ -27,10 +27,10 @@ async fn create_connections() {
     // create S7 connection pool
     let pool = S7Pool::new(std::net::Ipv4Addr::new(192, 168, 10, 72), S7Types::S71200)
         .expect("Could not create Pool");
-    let one = pool.db_read(0, 0, 1);
-    let two = pool.db_read(0, 0, 1);
-    let three = pool.db_read(0, 0, 1);
-    let four = pool.db_read(0, 0, 1);
+    let one = pool.db_read(TEST_DB, 0, 1);
+    let two = pool.db_read(TEST_DB, 0, 1);
+    let three = pool.db_read(TEST_DB, 0, 1);
+    let four = pool.db_read(TEST_DB, 0, 1);
 
     let (r1, r2, r3, r4) = join!(one, two, three, four);
     assert!(r1.is_ok() && r2.is_ok() && r3.is_ok() && r4.is_ok());
@@ -50,7 +50,7 @@ async fn test_data_exchange() {
     // write data
     let test_value: u32 = 32;
     let test_data = test_value.to_be_bytes();
-    pool.db_write(TEST_DB, 40, &test_data.to_vec())
+    pool.db_write(TEST_DB, 40, &test_data)
         .await
         .expect("Could not write to S7");
 
@@ -66,7 +66,7 @@ async fn test_data_exchange() {
     // write data
     let test_value: u32 = 18942;
     let test_data = test_value.to_be_bytes();
-    pool.db_write(TEST_DB, 40, &test_data.to_vec())
+    pool.db_write(TEST_DB, 40, &test_data)
         .await
         .expect("Could not write to S7");
 
@@ -125,17 +125,9 @@ async fn test_multi() {
         .expect("Could not create pool");
 
     let res = client
-        .db_read_multi(vec![
-            S7ReadAccess::Bytes {
-                db_number: TEST_DB,
-                start: 0,
-                length: 300,
-            },
-            S7ReadAccess::Bit {
-                db_number: TEST_DB,
-                byte: 0,
-                bit: 1,
-            },
+        .db_read_multi(&vec![
+            S7ReadAccess::bytes(TEST_DB, 0, 300),
+            S7ReadAccess::bit(TEST_DB, 0, 1),
         ])
         .await
         .expect("Could not read multiple items from PLC");
@@ -151,18 +143,9 @@ async fn test_multi() {
     assert_eq!(result2.len(), 1);
 
     let res = client
-        .db_write_multi(vec![
-            S7WriteAccess::Bytes {
-                db_number: TEST_DB,
-                start: 0,
-                data: &10_u32.to_be_bytes().to_vec(),
-            },
-            S7WriteAccess::Bit {
-                db_number: TEST_DB,
-                byte: 0,
-                bit: 1,
-                value: true,
-            },
+        .db_write_multi(&[
+            S7WriteAccess::bytes(TEST_DB, 0, &10_u32.to_be_bytes()),
+            S7WriteAccess::bit(TEST_DB, 0, 1, true),
         ])
         .await
         .expect("Could not write to PLC");
@@ -186,7 +169,7 @@ async fn test_read_split() {
 
     // read data
     let read_data = pool
-        .db_read(0, 40, 900)
+        .db_read(TEST_DB, 40, 900)
         .await
         .expect("Could not read data from S7");
 
@@ -199,10 +182,61 @@ async fn continuous_test() {
     let pool = S7Pool::new(std::net::Ipv4Addr::new(192, 168, 10, 72), S7Types::S71200)
         .expect("Could not create pool");
 
-    loop {
+    let mut cycles = 0;
+    while cycles < 10 {
         // read data
         println!("{:?}", pool.db_read_bit(TEST_DB, 0, 1).await);
 
         tokio::time::sleep(Duration::from_secs(1)).await;
+
+        cycles += 1;
     }
+}
+
+#[tokio::test]
+async fn test_triggers() {
+    // create single s7 client object
+    let pool = S7Pool::new(std::net::Ipv4Addr::new(192, 168, 10, 72), S7Types::S71200)
+        .expect("Could not create pool");
+
+    let mut trigger_collection = pool
+        .new_trigger_collection(&[("AHA", S7ReadAccess::bit(TEST_DB, 0, 1))])
+        .unwrap();
+
+    let mut iterator = 0;
+    while iterator < 5 {
+        pool.db_write_bit(TEST_DB, 0, 1, iterator % 2 == 0)
+            .await
+            .unwrap();
+
+        // read data
+        trigger_collection.update().await.unwrap();
+
+        if iterator % 2 == 0 {
+            assert_eq!(trigger_collection.positive_flank("AHA"), Some(true));
+        } else {
+            assert_eq!(trigger_collection.negative_flank("AHA"), Some(true));
+        }
+
+        iterator += 1;
+    }
+}
+
+#[tokio::test]
+async fn bit_error_test() -> Result<(), Error> {
+    // create single s7 client object
+    let pool = S7Pool::new(std::net::Ipv4Addr::new(192, 168, 10, 72), S7Types::S71200)?;
+
+    assert_eq!(
+        pool.db_read_bit(TEST_DB, 0, 8).await,
+        Err(Error::RequestedBitOutOfRange),
+    );
+
+    assert_eq!(
+        pool.db_read_multi(&[S7ReadAccess::bit(TEST_DB, 0, 9)])
+            .await,
+        Err(Error::RequestedBitOutOfRange),
+    );
+
+    Ok(())
 }

@@ -26,14 +26,16 @@ pub struct S7Client {
 
 impl S7Client {
     /// Create new standalone connection to an S7 PLC
-    ///```rust, ignore
+    ///```rust
+    /// # tokio_test::block_on(async {
     /// use std::net::Ipv4Addr;
     /// use s7client::{S7Client, S7Types};
     ///
     /// // create single s7 client
-    /// let mut client = S7Client::new(Ipv4Addr::new(127, 0, 0, 1), S7Types::S71200)
-    ///    .await
-    ///    .expect("Could not create S7 Client");
+    /// let mut client = S7Client::new(Ipv4Addr::new(192, 168, 10, 72), S7Types::S71200)
+    ///          .await?;
+    /// # Ok::<(), s7client::errors::Error>(())
+    /// # });
     /// ```
     /// # Errors
     ///
@@ -41,7 +43,7 @@ impl S7Client {
     pub async fn new(ip: Ipv4Addr, s7_type: S7Types) -> Result<Self, Error> {
         let tcp_client = match timeout(
             CONNECTION_TIMEOUT,
-            TcpStream::connect(format!("{}:{}", ip, TCP_PORT)),
+            TcpStream::connect(format!("{ip}:{TCP_PORT}")),
         )
         .await
         {

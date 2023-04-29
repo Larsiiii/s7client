@@ -27,28 +27,34 @@ s7client = { git = "https://github.com/Larsiiii/s7client" }
 A connection with a PLC can either be opened via a standalone connection ([`S7Client`](crate::client::create::S7Client)) or with a connection pool ([`S7Pool`](crate::client::pooled::S7Pool)).
 ## Connection via standalone connection
 ```rust
+# tokio_test::block_on(async {
 use std::net::Ipv4Addr;
 use s7client::{S7Client, S7Types};
 
 // create single s7 client
-let mut client = S7Client::new(Ipv4Addr::new(127, 0, 0, 1), S7Types::S71200)
-    .await
-    .expect("Could not create S7 Client");
+let mut client = S7Client::new(Ipv4Addr::new(192, 168, 10, 72), S7Types::S71200)
+    .await?;
 
 // read some data
-let data = client.db_read(100, 0, 4).await.expect("Could not read from S7 PLC");
+let data = client.db_read(100, 0, 4).await?;
+
+# Ok::<(), s7client::errors::Error>(())
+# });
 ```
 
 ## Connection via a pooled connection
 ```rust
+# tokio_test::block_on(async {
 use std::net::Ipv4Addr;
 use s7client::{S7Pool, S7Types};
 
 // create connection pool
-let mut client = S7Pool::new(Ipv4Addr::new(127, 0, 0, 1), S7Types::S71200);
+let mut pool = S7Pool::new(Ipv4Addr::new(192, 168, 10, 72), S7Types::S71200)?;
 
 // read some data
-let data = client.db_read(100, 0, 4).await.expect("Could not read from S7 PLC");
+let data = pool.db_read(100, 0, 4).await?;
+# Ok::<(), s7client::errors::Error>(())
+# });
 ```
 */
 
@@ -58,7 +64,7 @@ pub mod errors;
 mod s7_protocol;
 
 pub use client::create::S7Client;
-pub use client::{S7ReadAccess, S7WriteAccess};
+pub use client::{triggers::TriggerCollection, S7ReadAccess, S7WriteAccess};
 pub use connection::iso::S7Types;
 
 pub use client::pooled::S7Pool;

@@ -74,6 +74,7 @@ impl S7Types {
 
 struct Tsap {}
 impl Tsap {
+    #[allow(clippy::cast_possible_truncation)]
     fn build(s7_type: S7Types) -> Vec<u8> {
         let tsap_info = s7_type.to_tsap_info();
         let dst_tsap = ((ConnectionType::PG as u16) << 8)
@@ -389,10 +390,10 @@ impl CoTp for COTPData {
     }
 }
 
-impl TryFrom<Vec<u8>> for COTPData {
+impl TryFrom<&[u8]> for COTPData {
     type Error = Error;
 
-    fn try_from(bytes: Vec<u8>) -> Result<Self, Self::Error> {
+    fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
         match bytes.len() {
             3 => Ok(Self {
                 header_length: bytes[0],
@@ -400,7 +401,7 @@ impl TryFrom<Vec<u8>> for COTPData {
                 eot_num: bytes[2],
             }),
             _ => Err(Error::TryFrom(
-                bytes,
+                bytes.to_vec(),
                 "Could not convert bytes into TPKT Header".to_string(),
             )),
         }
@@ -474,7 +475,8 @@ impl IsoControlPDU {
                     1024 => 0x0A,
                     4096 => 0x0C,
                     8192 => 0x0D,
-                    2048 | _ => 0x0B, // Our Default
+                    // 2048 => 0x0B,
+                    _ => 0x0B, // Our Default
                 },
                 tsap: Tsap::build(s7_type),
             },
@@ -483,7 +485,7 @@ impl IsoControlPDU {
             dst_ref: DST_REF,           // Destination reference
             src_ref: SRC_REF,           // Source reference
             co_r: 0x00, // Class + Option : RFC0983 states that it must be always 0x40
-                        // but for some equipment (S7) must be 0 in disaccord of specifications !!!
+                        // but for some equipment (S7) must be 0 in contrast to specifications !!!
         };
 
         let header = TTPKTHeader {
@@ -514,6 +516,7 @@ pub(super) struct IsoDisconnect {
 }
 
 impl IsoDisconnect {
+    #[allow(clippy::cast_possible_truncation)]
     pub(crate) fn build() -> Self {
         let iso_len = mem::size_of::<TTPKTHeader>() - 1     // TPKT Header
                     + mem::size_of::<COTPDisconnect>(); // COTP Header Size without params

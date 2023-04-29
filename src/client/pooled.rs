@@ -1,6 +1,8 @@
+use std::hash::Hash;
 use std::net::Ipv4Addr;
 
-use crate::{errors::Error, S7Client, S7Types};
+use crate::S7ReadAccess;
+use crate::{errors::Error, S7Client, S7Types, TriggerCollection};
 use deadpool::{
     async_trait,
     managed::{self, BuildError},
@@ -72,13 +74,13 @@ pub struct S7Pool(pub(crate) S7PooledConnection);
 
 impl S7Pool {
     /// Create new pooled connection to an S7 PLC
-    ///```rust, ignore
+    ///```rust
     /// use std::net::Ipv4Addr;
     /// use s7client::{S7Pool, S7Types};
     ///
     /// // create S7 pool
-    /// let mut pool = S7Pool::new(Ipv4Addr::new(127, 0, 0, 1), S7Types::S71200)
-    ///     .expect("Could not create pool");
+    /// let mut pool = S7Pool::new(Ipv4Addr::new(127, 0, 0, 1), S7Types::S71200)?;
+    /// # Ok::<(), s7client::errors::Error>(())
     /// ```
     /// # Errors
     ///
@@ -92,5 +94,32 @@ impl S7Pool {
         let pool = S7PooledConnection::builder(mgr).max_size(3).build()?;
 
         Ok(S7Pool(pool))
+    }
+
+    /// Create new collection of observed `Bool` variables of S7 PLC
+    ///```rust
+    /// use std::net::Ipv4Addr;
+    /// use s7client::{S7Pool, S7Types, S7ReadAccess};
+    ///
+    /// // create S7 pool
+    /// let mut pool = S7Pool::new(Ipv4Addr::new(127, 0, 0, 1), S7Types::S71200)?;
+    /// // create trigger collection
+    /// let  trigger_collection = pool.new_trigger_collection(&[
+    ///         ("TRIGGER_ONE", S7ReadAccess::bit(100, 0, 1)),
+    ///         ("TRIGGER_TWO", S7ReadAccess::bit(100, 0, 2)),
+    ///     ])?;
+    /// # Ok::<(), s7client::errors::Error>(())
+    /// ```
+    /// # Errors
+    ///
+    /// Will return `Error` if the `TriggerCollection` could not be created.
+    pub fn new_trigger_collection<T>(
+        &self,
+        triggers: &[(T, S7ReadAccess)],
+    ) -> Result<TriggerCollection<T>, Error>
+    where
+        T: Hash + Eq + Clone,
+    {
+        TriggerCollection::new(self, triggers)
     }
 }
