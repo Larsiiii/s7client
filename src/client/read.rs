@@ -35,7 +35,7 @@ impl S7Client {
         length: u16,
     ) -> Result<Vec<u8>, Error> {
         self.validate_connection_info().await?;
-        read_area_single(
+        match read_area_single(
             self,
             Area::DataBlock,
             S7ReadAccess::Bytes {
@@ -45,6 +45,15 @@ impl S7Client {
             },
         )
         .await
+        {
+            Ok(result) => Ok(result),
+            Err(error) => {
+                if error.is_connection_error() {
+                    self.reset_connection_info();
+                }
+                Err(error)
+            }
+        }
     }
 
     /// Read a specific bit from a specified data block
@@ -120,7 +129,15 @@ impl S7Client {
             verify_max_bit(access.max_bit())?;
         }
 
-        read_area_multi(self, Area::DataBlock, info).await
+        match read_area_multi(self, Area::DataBlock, info).await {
+            Ok(result) => Ok(result),
+            Err(error) => {
+                if error.is_connection_error() {
+                    self.reset_connection_info();
+                }
+                Err(error)
+            }
+        }
     }
 
     /// Read a defined number of bytes from the 'Merker area' of the PLC with a certain offset
@@ -142,7 +159,7 @@ impl S7Client {
     /// Will return `Error` if any errors occurred during reading.
     pub async fn mb_read(&mut self, start: u32, length: u16) -> Result<Vec<u8>, Error> {
         self.validate_connection_info().await?;
-        read_area_single(
+        match read_area_single(
             self,
             Area::Merker,
             S7ReadAccess::Bytes {
@@ -152,6 +169,15 @@ impl S7Client {
             },
         )
         .await
+        {
+            Ok(result) => Ok(result),
+            Err(error) => {
+                if error.is_connection_error() {
+                    self.reset_connection_info();
+                }
+                Err(error)
+            }
+        }
     }
 
     /// Read a defined number of bytes from the 'input value area' of the PLC with a certain offset
@@ -173,7 +199,7 @@ impl S7Client {
     /// Will return `Error` if any errors occurred during reading.
     pub async fn i_read(&mut self, start: u32, length: u16) -> Result<Vec<u8>, Error> {
         self.validate_connection_info().await?;
-        read_area_single(
+        match read_area_single(
             self,
             Area::ProcessInput,
             S7ReadAccess::Bytes {
@@ -183,6 +209,15 @@ impl S7Client {
             },
         )
         .await
+        {
+            Ok(result) => Ok(result),
+            Err(error) => {
+                if error.is_connection_error() {
+                    self.reset_connection_info();
+                }
+                Err(error)
+            }
+        }
     }
 
     /// Read a defined number of bytes from the 'output value area' of the PLC with a certain offset
@@ -204,7 +239,7 @@ impl S7Client {
     /// Will return `Error` if any errors occurred during reading.
     pub async fn o_read(&mut self, start: u32, length: u16) -> Result<Vec<u8>, Error> {
         self.validate_connection_info().await?;
-        read_area_single(
+        match read_area_single(
             self,
             Area::ProcessOutput,
             S7ReadAccess::Bytes {
@@ -214,6 +249,15 @@ impl S7Client {
             },
         )
         .await
+        {
+            Ok(result) => Ok(result),
+            Err(error) => {
+                if error.is_connection_error() {
+                    self.reset_connection_info();
+                }
+                Err(error)
+            }
+        }
     }
 }
 

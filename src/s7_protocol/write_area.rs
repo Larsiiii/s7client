@@ -81,7 +81,7 @@ pub(crate) async fn write_area_single(
     // Moreover we must ensure that a "finite" number of items is send per PDU. If the command size does not fit in one PDU
     // then it must be split across more subsequent PDU.
 
-    assert_pdu_size_for_write(&vec![data_item], client.pdu_length.into())?;
+    assert_pdu_size_for_write(&[data_item], client.pdu_length.into())?;
 
     let request_params = BytesMut::from(ReadWriteParams::build_write(&[RequestItem::build(
         area,
