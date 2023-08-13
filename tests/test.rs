@@ -240,3 +240,48 @@ async fn bit_error_test() -> Result<(), Error> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn test_multi_connection_pool() -> Result<(), Error> {
+    // create single s7 client object
+    let pool = S7Pool::new(std::net::Ipv4Addr::new(192, 168, 10, 72), S7Types::S71200)?;
+
+    let pool_1 = pool.clone();
+    tokio::spawn(async move {
+        loop {
+            assert!(pool_1.db_read(TEST_DB, 0, 10).await.is_ok());
+        }
+    });
+
+    let pool_2 = pool.clone();
+    tokio::spawn(async move {
+        loop {
+            assert!(pool_2.db_read(TEST_DB, 0, 10).await.is_ok());
+        }
+    });
+
+    let pool_3 = pool.clone();
+    tokio::spawn(async move {
+        loop {
+            assert!(pool_3.db_read(TEST_DB, 0, 10).await.is_ok());
+        }
+    });
+
+    let pool_4 = pool.clone();
+    tokio::spawn(async move {
+        loop {
+            assert!(pool_4.db_read(TEST_DB, 0, 10).await.is_ok());
+        }
+    });
+
+    let pool_5 = pool.clone();
+    tokio::spawn(async move {
+        loop {
+            assert!(pool_5.db_read(TEST_DB, 0, 10).await.is_ok());
+        }
+    });
+
+    tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+
+    Ok(())
+}
