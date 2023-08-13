@@ -22,6 +22,7 @@ pub struct S7Client {
     // The Max AMQ parameters define how many unacknowledged requests a PLC (Callee) is able to accept from a client (Caller).
     pub(crate) max_amq_caller: u16,
     pub(crate) max_amq_calle: u16,
+    closed: bool,
 }
 
 impl S7Client {
@@ -65,6 +66,7 @@ impl S7Client {
             pdu_number: 0,
             max_amq_caller: 0,
             max_amq_calle: 0,
+            closed: true,
         })
     }
 
@@ -81,6 +83,8 @@ impl S7Client {
         self.max_amq_caller = connection_parameters.max_amq_caller;
         self.max_amq_calle = connection_parameters.max_amq_calle;
 
+        self.closed = false;
+
         Ok(())
     }
 
@@ -90,21 +94,23 @@ impl S7Client {
     /// Will return `Error` if the connection to the PLC could not be closed gracefully.
     pub async fn disconnect(&mut self) -> Result<(), Error> {
         disconnect(&mut self.connection).await?;
-        self.reset_connection_info();
+        self.closed = true;
         Ok(())
     }
 
     pub(crate) async fn validate_connection_info(&mut self) -> Result<(), Error> {
-        if self.pdu_length == 0 {
+        if self.closed {
             self.connect().await?;
         }
         Ok(())
     }
 
-    pub(crate) fn reset_connection_info(&mut self) {
-        self.pdu_length = 0;
-        self.max_amq_calle = 0;
-        self.max_amq_caller = 0;
+    pub(crate) fn set_closed(&mut self) {
+        self.closed = true;
+    }
+
+    pub(crate) fn is_closed(&self) -> bool {
+        self.closed
     }
 }
 

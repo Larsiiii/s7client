@@ -49,7 +49,7 @@ impl S7Client {
             Ok(result) => Ok(result),
             Err(error) => {
                 if error.is_connection_error() {
-                    self.reset_connection_info();
+                    self.set_closed();
                 }
                 Err(error)
             }
@@ -93,7 +93,7 @@ impl S7Client {
             Ok(result) => Ok(result[0] > 0),
             Err(error) => {
                 if error.is_connection_error() {
-                    self.reset_connection_info();
+                    self.set_closed();
                 }
                 Err(error)
             }
@@ -133,7 +133,7 @@ impl S7Client {
             Ok(result) => Ok(result),
             Err(error) => {
                 if error.is_connection_error() {
-                    self.reset_connection_info();
+                    self.set_closed();
                 }
                 Err(error)
             }
@@ -173,7 +173,7 @@ impl S7Client {
             Ok(result) => Ok(result),
             Err(error) => {
                 if error.is_connection_error() {
-                    self.reset_connection_info();
+                    self.set_closed();
                 }
                 Err(error)
             }
@@ -213,7 +213,7 @@ impl S7Client {
             Ok(result) => Ok(result),
             Err(error) => {
                 if error.is_connection_error() {
-                    self.reset_connection_info();
+                    self.set_closed();
                 }
                 Err(error)
             }
@@ -253,7 +253,7 @@ impl S7Client {
             Ok(result) => Ok(result),
             Err(error) => {
                 if error.is_connection_error() {
-                    self.reset_connection_info();
+                    self.set_closed();
                 }
                 Err(error)
             }
