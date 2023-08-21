@@ -77,7 +77,7 @@ impl Tsap {
     #[allow(clippy::cast_possible_truncation)]
     fn build(s7_type: S7Types) -> Vec<u8> {
         let tsap_info = s7_type.to_tsap_info();
-        let dst_tsap = ((ConnectionType::PG as u16) << 8)
+        let dst_tsap = ((ConnectionType::Basic as u16) << 8)
             + (u16::from(tsap_info.rack) * 0x20)
             + u16::from(tsap_info.slot);
         vec![
