@@ -59,7 +59,7 @@ impl S7Client {
             }
         }?;
 
-        Ok(Self {
+        let mut client = Self {
             connection: tcp_client,
             s7_type,
             pdu_length: 0,
@@ -67,7 +67,10 @@ impl S7Client {
             max_amq_caller: 0,
             max_amq_calle: 0,
             closed: true,
-        })
+        };
+        client.connect().await?;
+
+        Ok(client)
     }
 
     /// Manually trigger negotiation of connection parameters
@@ -100,7 +103,7 @@ impl S7Client {
 
     pub(crate) async fn validate_connection_info(&mut self) -> Result<(), Error> {
         if self.closed {
-            self.connect().await?;
+            return Err(Error::Connection("Connection is closed".to_string()));
         }
         Ok(())
     }

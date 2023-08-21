@@ -18,10 +18,7 @@ impl managed::Manager for S7PoolManager {
     type Error = Error;
 
     async fn create(&self) -> Result<S7Client, Error> {
-        let mut client = S7Client::new(self.s7_ip, self.s7_type).await?;
-        client.connect().await?;
-
-        Ok(client)
+        Ok(S7Client::new(self.s7_ip, self.s7_type).await?)
     }
 
     async fn recycle(&self, client: &mut S7Client) -> managed::RecycleResult<Error> {
