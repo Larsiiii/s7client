@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 tokio = { version = "1.29.1", features = ["net", "rt", "io-util", "time"] }
 deadpool = { version = "0.9.5", features = ["managed"] }
+bb8 = "0.8.1"
 bytes = "1.4.0"
 
 [dev-dependencies]

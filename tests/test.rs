@@ -26,6 +26,7 @@ async fn create_connections() {
 
     // create S7 connection pool
     let pool = S7Pool::new(std::net::Ipv4Addr::new(192, 168, 10, 72), S7Types::S71200)
+        .await
         .expect("Could not create Pool");
     let one = pool.db_read(TEST_DB, 0, 1);
     let two = pool.db_read(TEST_DB, 0, 1);
@@ -44,6 +45,7 @@ async fn create_connections() {
 async fn test_data_exchange() {
     // create S7 connection pool
     let test_pool = S7Pool::new(std::net::Ipv4Addr::new(192, 168, 10, 72), S7Types::S71200)
+        .await
         .expect("Could not create pool");
     let pool = test_pool.clone();
 
@@ -122,6 +124,7 @@ async fn test_bit_exchange() {
 async fn test_multi() {
     // create single s7 client object
     let client = S7Pool::new(std::net::Ipv4Addr::new(192, 168, 10, 72), S7Types::S71200)
+        .await
         .expect("Could not create pool");
 
     let res = client
@@ -165,6 +168,7 @@ async fn test_multi() {
 async fn test_read_split() {
     // create single s7 client object
     let pool = S7Pool::new(std::net::Ipv4Addr::new(192, 168, 10, 72), S7Types::S71200)
+        .await
         .expect("Could not create pool");
 
     // read data
@@ -180,6 +184,7 @@ async fn test_read_split() {
 async fn continuous_test() {
     // create single s7 client object
     let pool = S7Pool::new(std::net::Ipv4Addr::new(192, 168, 10, 72), S7Types::S71200)
+        .await
         .expect("Could not create pool");
 
     let mut cycles = 0;
@@ -197,6 +202,7 @@ async fn continuous_test() {
 async fn test_triggers() {
     // create single s7 client object
     let pool = S7Pool::new(std::net::Ipv4Addr::new(192, 168, 10, 72), S7Types::S71200)
+        .await
         .expect("Could not create pool");
 
     let mut trigger_collection = pool
@@ -225,7 +231,7 @@ async fn test_triggers() {
 #[tokio::test]
 async fn bit_error_test() -> Result<(), Error> {
     // create single s7 client object
-    let pool = S7Pool::new(std::net::Ipv4Addr::new(192, 168, 10, 72), S7Types::S71200)?;
+    let pool = S7Pool::new(std::net::Ipv4Addr::new(192, 168, 10, 72), S7Types::S71200).await?;
 
     assert_eq!(
         pool.db_read_bit(TEST_DB, 0, 8).await,
@@ -244,7 +250,7 @@ async fn bit_error_test() -> Result<(), Error> {
 #[tokio::test]
 async fn test_multi_connection_pool() -> Result<(), Error> {
     // create single s7 client object
-    let pool = S7Pool::new(std::net::Ipv4Addr::new(192, 168, 10, 72), S7Types::S71200)?;
+    let pool = S7Pool::new(std::net::Ipv4Addr::new(192, 168, 10, 72), S7Types::S71200).await?;
 
     let pool_1 = pool.clone();
     tokio::spawn(async move {

@@ -12,25 +12,45 @@ pub(crate) struct S7PoolManager {
     s7_type: S7Types,
 }
 
+// #[async_trait]
+// impl managed::Manager for S7PoolManager {
+//     type Type = S7Client;
+//     type Error = Error;
+
+//     async fn create(&self) -> Result<S7Client, Error> {
+//         Ok(S7Client::new(self.s7_ip, self.s7_type).await?)
+//     }
+
+//     async fn recycle(&self, client: &mut S7Client) -> managed::RecycleResult<Error> {
+//         if client.is_closed() {
+//             Err(managed::RecycleError::StaticMessage("Connection closed"))
+//         } else {
+//             Ok(())
+//         }
+//     }
+// }
+
 #[async_trait]
-impl managed::Manager for S7PoolManager {
-    type Type = S7Client;
+impl bb8::ManageConnection for S7PoolManager {
+    type Connection = S7Client;
     type Error = Error;
 
-    async fn create(&self) -> Result<S7Client, Error> {
+    async fn connect(&self) -> Result<Self::Connection, Self::Error> {
         Ok(S7Client::new(self.s7_ip, self.s7_type).await?)
     }
 
-    async fn recycle(&self, client: &mut S7Client) -> managed::RecycleResult<Error> {
-        if client.is_closed() {
-            Err(managed::RecycleError::StaticMessage("Connection closed"))
-        } else {
-            Ok(())
-        }
+    async fn is_valid(&self, connection: &mut Self::Connection) -> Result<(), Self::Error> {
+        // conn.simple_query("").await.map(|_| ())
+        Ok(())
+    }
+
+    fn has_broken(&self, connection: &mut Self::Connection) -> bool {
+        connection.is_closed()
     }
 }
 
-type S7PooledConnection = managed::Pool<S7PoolManager>;
+// type S7PooledConnection = managed::Pool<S7PoolManager>;
+type S7PooledConnection = bb8::Pool<S7PoolManager>;
 
 /// Pooled connection to a PLC device from the S7 family
 #[allow(missing_debug_implementations)]
@@ -50,9 +70,14 @@ impl S7Pool {
     /// # Errors
     ///
     /// Will return `Error` if the `Pool` could not be created.
-    pub fn new(ip: Ipv4Addr, s7_type: S7Types) -> Result<Self, BuildError<Error>> {
+    pub async fn new(ip: Ipv4Addr, s7_type: S7Types) -> Result<Self, BuildError<Error>> {
         let mgr = S7PoolManager { s7_ip: ip, s7_type };
-        let pool = S7PooledConnection::builder(mgr).max_size(3).build()?;
+        // let pool = S7PooledConnection::builder(mgr).max_size(3).build()?;
+        let pool = S7PooledConnection::builder()
+            .max_size(3)
+            .build(mgr)
+            .await
+            .unwrap();
 
         Ok(S7Pool(pool))
     }

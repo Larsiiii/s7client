@@ -3,6 +3,7 @@
 use std::fmt;
 use std::io::{Error as IOError, ErrorKind};
 
+use bb8::RunError;
 use deadpool::managed::{BuildError, PoolError};
 
 #[derive(Debug, PartialEq)]
@@ -62,6 +63,12 @@ impl From<BuildError<Error>> for Error {
 
 impl From<PoolError<Error>> for Error {
     fn from(e: PoolError<Error>) -> Self {
+        Error::Pool(e.to_string())
+    }
+}
+
+impl From<RunError<Error>> for Error {
+    fn from(e: RunError<Error>) -> Self {
         Error::Pool(e.to_string())
     }
 }
