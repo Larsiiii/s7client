@@ -34,7 +34,7 @@ impl S7Client {
         start: u32,
         length: u16,
     ) -> Result<Vec<u8>, Error> {
-        self.validate_connection_info().await?;
+        self.validate_connection_info()?;
         match read_area_single(
             self,
             Area::DataBlock,
@@ -75,7 +75,7 @@ impl S7Client {
     ///
     /// Will return `Error` if any errors occurred during reading.
     pub async fn db_read_bit(&mut self, db_number: u16, byte: u32, bit: u8) -> Result<bool, Error> {
-        self.validate_connection_info().await?;
+        self.validate_connection_info()?;
 
         verify_max_bit(bit)?;
 
@@ -123,7 +123,7 @@ impl S7Client {
         &mut self,
         info: &[S7ReadAccess],
     ) -> Result<Vec<Result<Vec<u8>, Error>>, Error> {
-        self.validate_connection_info().await?;
+        self.validate_connection_info()?;
 
         for access in info {
             verify_max_bit(access.max_bit())?;
@@ -158,7 +158,7 @@ impl S7Client {
     ///
     /// Will return `Error` if any errors occurred during reading.
     pub async fn mb_read(&mut self, start: u32, length: u16) -> Result<Vec<u8>, Error> {
-        self.validate_connection_info().await?;
+        self.validate_connection_info()?;
         match read_area_single(
             self,
             Area::Merker,
@@ -198,7 +198,7 @@ impl S7Client {
     ///
     /// Will return `Error` if any errors occurred during reading.
     pub async fn i_read(&mut self, start: u32, length: u16) -> Result<Vec<u8>, Error> {
-        self.validate_connection_info().await?;
+        self.validate_connection_info()?;
         match read_area_single(
             self,
             Area::ProcessInput,
@@ -238,7 +238,7 @@ impl S7Client {
     ///
     /// Will return `Error` if any errors occurred during reading.
     pub async fn o_read(&mut self, start: u32, length: u16) -> Result<Vec<u8>, Error> {
-        self.validate_connection_info().await?;
+        self.validate_connection_info()?;
         match read_area_single(
             self,
             Area::ProcessOutput,

@@ -101,7 +101,7 @@ impl S7Client {
         Ok(())
     }
 
-    pub(crate) async fn validate_connection_info(&mut self) -> Result<(), Error> {
+    pub(crate) fn validate_connection_info(&mut self) -> Result<(), Error> {
         if self.closed {
             return Err(Error::Connection("Connection is closed".to_string()));
         }

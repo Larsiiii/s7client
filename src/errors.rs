@@ -4,7 +4,6 @@ use std::fmt;
 use std::io::{Error as IOError, ErrorKind};
 
 use bb8::RunError;
-use deadpool::managed::{BuildError, PoolError};
 
 #[derive(Debug, PartialEq)]
 /// Possible errors returned by `S7Client` or `S7Pool`
@@ -52,18 +51,6 @@ pub enum Error {
 impl From<IOError> for Error {
     fn from(e: IOError) -> Self {
         Error::IO(e.kind())
-    }
-}
-
-impl From<BuildError<Error>> for Error {
-    fn from(value: BuildError<Error>) -> Self {
-        Self::Pool(value.to_string())
-    }
-}
-
-impl From<PoolError<Error>> for Error {
-    fn from(e: PoolError<Error>) -> Self {
-        Error::Pool(e.to_string())
     }
 }
 

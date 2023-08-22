@@ -25,7 +25,7 @@ impl S7Client {
     ///
     /// Will return `Error` if any errors occurred during writing.
     pub async fn db_write(&mut self, db_number: u16, start: u32, data: &[u8]) -> Result<(), Error> {
-        self.validate_connection_info().await?;
+        self.validate_connection_info()?;
         write_area_single(
             self,
             Area::DataBlock,
@@ -63,7 +63,7 @@ impl S7Client {
         bit: u8,
         value: bool,
     ) -> Result<(), Error> {
-        self.validate_connection_info().await?;
+        self.validate_connection_info()?;
 
         verify_max_bit(bit)?;
 
@@ -103,7 +103,7 @@ impl S7Client {
         &mut self,
         info: &[S7WriteAccess<'_>],
     ) -> Result<Vec<Result<(), Error>>, Error> {
-        self.validate_connection_info().await?;
+        self.validate_connection_info()?;
 
         for access in info {
             verify_max_bit(access.max_bit())?;
@@ -130,7 +130,7 @@ impl S7Client {
     ///
     /// Will return `Error` if any errors occurred during writing.
     pub async fn mb_write(&mut self, start: u32, data: &[u8]) -> Result<(), Error> {
-        self.validate_connection_info().await?;
+        self.validate_connection_info()?;
         write_area_single(
             self,
             Area::Merker,
@@ -161,7 +161,7 @@ impl S7Client {
     ///
     /// Will return `Error` if any errors occurred during writing.
     pub async fn i_write(&mut self, start: u32, data: &[u8]) -> Result<(), Error> {
-        self.validate_connection_info().await?;
+        self.validate_connection_info()?;
         write_area_single(
             self,
             Area::ProcessInput,
@@ -192,7 +192,7 @@ impl S7Client {
     ///
     /// Will return `Error` if any errors occurred during writing.
     pub async fn o_write(&mut self, start: u32, data: &[u8]) -> Result<(), Error> {
-        self.validate_connection_info().await?;
+        self.validate_connection_info()?;
         write_area_single(
             self,
             Area::ProcessOutput,
