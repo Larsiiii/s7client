@@ -50,10 +50,12 @@ impl S7Pool {
     /// # Errors
     ///
     /// Will return `Error` if the `Pool` could not be created.
-    pub async fn new(ip: Ipv4Addr, s7_type: S7Types) -> Result<Self, Error> {
+    pub fn new(ip: Ipv4Addr, s7_type: S7Types) -> Result<Self, Error> {
         let mgr = S7PoolManager { s7_ip: ip, s7_type };
         // let pool = S7PooledConnection::builder(mgr).max_size(3).build()?;
-        let pool = S7PooledConnection::builder().max_size(3).build(mgr).await?;
+        let pool = S7PooledConnection::builder()
+            .max_size(3)
+            .build_unchecked(mgr);
 
         Ok(S7Pool(pool))
     }
