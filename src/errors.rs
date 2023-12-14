@@ -100,6 +100,7 @@ impl Error {
             Error::IO(_)
                 | Error::Connection(_)
                 | Error::DataExchangeTimedOut
+                | Error::ResponseDoesNotBelongToCurrentPDU
                 | Error::ISOResponse(_) // | Error::ISORequest(_)
         )
     }
@@ -112,7 +113,7 @@ pub enum IsoError {
     // Disconnect = 0x0002_0000,      // Disconnect error
     /// Bad format
     InvalidPDU,
-    /// Bad Data size passed to send/recv : buffer is invalid
+    /// Bad Data size passed to send/receive : buffer is invalid
     InvalidDataSize,
     // NullPointer = 0x00050000,      // Null passed as pointer
     /// A short packet was received
@@ -120,7 +121,7 @@ pub enum IsoError {
     // TooManyFragments = 0x0007_0000, // Too many packets without EoT flag
     // PduOverflow = 0x0008_0000,      // The sum of fragments data exceeded maximum packet size
     // SendPacket = 0x0009_0000,       // An error occurred during send
-    // RecvPacket = 0x000A_0000,       // An error occurred during recv
+    // RecvPacket = 0x000A_0000,       // An error occurred during receive
     // InvalidParams = 0x000B_0000,    // Invalid TSAP params
     // Unknown,
 }
@@ -134,14 +135,15 @@ impl fmt::Display for IsoError {
                 // Self::Connect => " ISO : Connection error",
                 // Self::Disconnect => " ISO : Disconnect error",
                 Self::InvalidPDU => " ISO : Bad PDU format",
-                Self::InvalidDataSize => " ISO : Data size passed to send/recv buffer is invalid",
+                Self::InvalidDataSize =>
+                    " ISO : Data size passed to send/receive buffer is invalid",
                 // Self::NullPointer => " ISO : Null passed as pointer",
                 Self::ShortPacket => " ISO : A short packet received",
                 // Self::TooManyFragments => " ISO : Too many packets without EoT flag",
                 // Self::PduOverflow =>
                 //     " ISO : The sum of fragments data exceeded maximum packet size",
                 // Self::SendPacket => " ISO : An error occurred during send",
-                // Self::RecvPacket => " ISO : An error occurred during recv",
+                // Self::RecvPacket => " ISO : An error occurred during receive",
                 // Self::InvalidParams => "ISO : Invalid connection params (wrong TSAPs)",
                 // Self::Unknown => " ISO : Unknown error",
             }
@@ -243,7 +245,7 @@ impl From<u8> for S7DataItemResponseError {
 
 #[cfg(test)]
 mod tests {
-    use error_stack::{IntoReport, Report, ResultExt};
+    use error_stack::{Report, ResultExt};
 
     use super::*;
 
@@ -253,9 +255,7 @@ mod tests {
     }
 
     fn create_error_stack() -> Result<(), Report<Error>> {
-        create_error()
-            .into_report()
-            .change_context(Error::RequestedBitOutOfRange)
+        create_error().change_context(Error::RequestedBitOutOfRange)
     }
 
     fn create_error() -> Result<(), Error> {
