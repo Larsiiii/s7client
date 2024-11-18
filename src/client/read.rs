@@ -180,6 +180,46 @@ impl S7Client {
         }
     }
 
+    /// Read multiple bytes or bits from different 'Merker area' locations of the PLC
+    ///
+    /// # Example
+    /// ```rust
+    /// # use std::net::Ipv4Addr;
+    /// # use s7client::{S7Client, S7Types, S7ReadAccess};
+    /// # tokio_test::block_on(async {
+    /// # let mut client = S7Client::new(Ipv4Addr::new(192, 168, 10, 72), S7Types::S71200).await?;
+    /// let data = client.mb_read_multi(&[
+    ///        S7ReadAccess::bytes(0, 0, 10),
+    ///        S7ReadAccess::bit(0, 0, 1),
+    ///    ])
+    ///    .await?;
+    /// # Ok::<(), s7client::errors::Error>(())
+    /// });
+    /// ```
+    /// # Errors
+    ///
+    /// Will return `Error` if any errors occurred during reading.
+    pub async fn mb_read_multi(
+        &mut self,
+        info: &[S7ReadAccess],
+    ) -> Result<Vec<Result<Vec<u8>, Error>>, Error> {
+        self.validate_connection_info()?;
+
+        for access in info {
+            verify_max_bit(access.max_bit())?;
+        }
+
+        match read_area_multi(self, Area::Merker, info).await {
+            Ok(result) => Ok(result),
+            Err(error) => {
+                if error.is_connection_error() {
+                    self.set_closed();
+                }
+                Err(error)
+            }
+        }
+    }
+
     /// Read a defined number of bytes from the 'input value area' of the PLC with a certain offset
     ///
     /// # Example
